@@ -70,6 +70,7 @@ async def test_engine():
         ams_label,
         api_key,
         archive,
+        color_catalog,
         external_link,
         filament,
         group,
@@ -84,6 +85,7 @@ async def test_engine():
         smart_plug,
         spool,
         spool_assignment,
+        spool_catalog,
         spool_usage_history,
         user,
     )
