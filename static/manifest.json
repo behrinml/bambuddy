@@ -35,7 +35,23 @@
       "src": "/img/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/img/screenshot-mobile.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Bambuddy on mobile"
+    },
+    {
+      "src": "/img/screenshot-desktop.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Bambuddy on desktop"
     }
   ],
   "categories": ["utilities", "productivity"],
