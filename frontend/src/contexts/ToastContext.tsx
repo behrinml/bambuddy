@@ -342,9 +342,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       }
 
       const recentStatus = detail.recent_event?.status;
-      if (!hasActiveWork && recentStatus && ['cancelled', 'failed', 'completed', 'idle'].includes(recentStatus)) {
-        setToasts((prev) => prev.filter((t) => t.id !== dispatchToastId));
-      }
 
       if (allDone) {
         const summaryKey = `${completed}:${failed}`;
@@ -353,17 +350,42 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         }
         lastDispatchSummaryRef.current = summaryKey;
 
-        setToasts((prev) => prev.filter((t) => t.id !== dispatchToastId));
         const doneMessage = failed > 0
           ? t('backgroundDispatch.toast.completeWithFailures', { completed, failed })
           : t('backgroundDispatch.toast.completeSuccess', { completed });
-        const id = Math.random().toString(36).substr(2, 9);
-        setToasts((prev) => [...prev, { id, message: doneMessage, type: failed > 0 ? 'warning' : 'success' }]);
+
+        // Show a brief "completed" state on the dispatch toast before replacing with summary
+        // This ensures the user sees confirmation even for fast uploads (#615)
+        setToasts((prev) => {
+          const doneToast: Toast = {
+            id: dispatchToastId,
+            message: doneMessage,
+            type: failed > 0 ? 'warning' : 'success',
+            persistent: true,
+            // Clear dispatchData so it renders as a simple text toast
+          };
+          const exists = prev.find((toastItem) => toastItem.id === dispatchToastId);
+          if (exists) {
+            return prev.map((toastItem) =>
+              toastItem.id === dispatchToastId ? doneToast : toastItem
+            );
+          }
+          return [...prev, doneToast];
+        });
+
+        // Auto-dismiss after 3 seconds
+        const existingTimeout = timeoutRefs.current.get(dispatchToastId);
+        if (existingTimeout) clearTimeout(existingTimeout);
         const timeout = setTimeout(() => {
-          setToasts((prev) => prev.filter((t) => t.id !== id));
-          timeoutRefs.current.delete(id);
-        }, 4000);
-        timeoutRefs.current.set(id, timeout);
+          setToasts((prev) => prev.filter((t) => t.id !== dispatchToastId));
+          timeoutRefs.current.delete(dispatchToastId);
+        }, 3000);
+        timeoutRefs.current.set(dispatchToastId, timeout);
+        return;
+      }
+
+      if (!hasActiveWork && recentStatus && ['cancelled', 'failed', 'completed', 'idle'].includes(recentStatus)) {
+        setToasts((prev) => prev.filter((t) => t.id !== dispatchToastId));
       }
 
       if (detail.recent_event?.status === 'idle' && !hasActiveWork) {
