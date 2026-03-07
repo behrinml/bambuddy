@@ -636,7 +636,7 @@ async def replace_k_profiles(
 async def list_assignments(
     printer_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_READ),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_VIEW_ASSIGNMENTS),
 ):
     """List spool assignments, optionally filtered by printer."""
     from backend.app.services.printer_manager import printer_manager

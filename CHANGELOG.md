@@ -4,6 +4,12 @@ All notable changes to Bambuddy will be documented in this file.
 
 ## [0.2.2b3] - Unreleased
 
+### New Features
+- **Malaysian Ringgit Currency** ([#634](https://github.com/maziggy/bambuddy/issues/634)) — Added MYR (RM) to the list of supported currencies for filament cost tracking. Requested by @cynogen127.
+
+### Improved
+- **Separate Permission for AMS Spool Assignments** ([#635](https://github.com/maziggy/bambuddy/issues/635)) — Added a new `inventory:view_assignments` permission that controls whether spool-to-AMS-slot assignment data is visible on the Printers page. Previously, viewing spool assignments on printer cards required `inventory:read`, which also exposed the full Inventory page in the sidebar. Admins can now grant `inventory:view_assignments` without `inventory:read` so users can see what's loaded in the AMS without accessing the full spool inventory. All default groups (Administrators, Operators, Viewers) include the new permission automatically. Also fixed multi-word permission labels in the group editor (e.g. "Update_Own" → "Update Own"). Reported by @Minebuddy.
+
 ### Fixed
 - **Dispatch Toast Stuck After Second Print** — The print dispatch progress toast ("Starting prints…") stayed visible forever after the second print dispatch in a session. The dedup guard (`lastDispatchSummaryRef`) that prevents duplicate completion toasts was never reset between batches, so every single-printer dispatch produced the same summary key (`"first-complete:1:0"`). The first print completed normally, but subsequent completions matched the stale ref and skipped creating the done toast — leaving the progress toast stuck in "Processing" state with no way to dismiss except a page reload. Now resets the dedup guard whenever the dispatch toast is dismissed (auto-dismiss timeout, cleanup events) and when a new batch starts.
 
