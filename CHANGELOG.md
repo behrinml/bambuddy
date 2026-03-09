@@ -10,6 +10,7 @@ All notable changes to Bambuddy will be documented in this file.
 
 ### Fixed
 - **Clear Plate Prompt Shown for Staged Queue Items** — The "Clear Plate & Start Next" button on the printer card appeared when all pending queue items were staged (`manual_start`/Queue Only), even though the scheduler won't auto-start them. The clear plate prompt now only appears when there are auto-dispatchable items that the scheduler will actually start after the plate is cleared.
+- **Ethernet Badge Always Shown on Printer Cards** — The printer card network badge always showed "Ethernet" instead of the WiFi signal indicator, even on printers without an ethernet port. The `home_flag` bit 18 was incorrectly interpreted as indicating a wired connection. Removed the faulty ethernet detection; the WiFi signal badge now displays correctly when the printer reports signal strength.
 
 ## [0.2.2b3] - Unreleased
 
