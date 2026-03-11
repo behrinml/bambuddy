@@ -275,6 +275,14 @@ async def generate_rtsp_mjpeg_stream(
 
                 if not chunk:
                     logger.warning("Camera stream ended (no more data)")
+                    # Log ffmpeg stderr for diagnostics
+                    if process and process.stderr:
+                        try:
+                            stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=2.0)
+                            if stderr_data:
+                                logger.warning("ffmpeg stderr: %s", stderr_data.decode(errors="replace"))
+                        except (TimeoutError, Exception):
+                            pass
                     break
 
                 buffer += chunk
@@ -317,6 +325,14 @@ async def generate_rtsp_mjpeg_stream(
 
             except TimeoutError:
                 logger.warning("Camera stream read timeout")
+                # Log ffmpeg stderr for diagnostics
+                if process and process.stderr:
+                    try:
+                        stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=2.0)
+                        if stderr_data:
+                            logger.warning("ffmpeg stderr on timeout: %s", stderr_data.decode(errors="replace"))
+                    except (TimeoutError, Exception):
+                        pass
                 break
             except asyncio.CancelledError:
                 logger.info("Camera stream cancelled (stream_id=%s)", stream_id)
