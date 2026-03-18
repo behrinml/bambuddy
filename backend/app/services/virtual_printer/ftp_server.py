@@ -17,8 +17,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Default FTP port for Bambu printers (implicit FTPS)
-FTP_PORT = 9990
+# Default FTP port for Bambu printers (implicit FTPS).
+# Must be 990 (same as real printers) to avoid iptables REDIRECT,
+# which rewrites the destination IP to the incoming interface's primary
+# address — breaking multi-VP setups with different bind IPs.
+# Requires CAP_NET_BIND_SERVICE or root.
+FTP_PORT = 990
 
 
 class FTPSession:
@@ -568,7 +572,7 @@ class VirtualPrinterFTPServer:
         if self._running:
             return
 
-        logger.info("Starting virtual printer implicit FTPS on port %s", self.port)
+        logger.info("[%s] Starting virtual printer implicit FTPS on %s:%s", self.vp_name, self.bind_address, self.port)
 
         # Ensure upload directory exists
         self.upload_dir.mkdir(parents=True, exist_ok=True)

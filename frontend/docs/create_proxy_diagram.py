@@ -284,7 +284,7 @@ def create_diagram():
 
     # Ports on remote side
     draw.text((remote_x, section_y + 100), "Connects to Bambuddy", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
-    draw.text((remote_x, section_y + 120), "FTP :9990  MQTT :8883", font=fonts['port_small'], fill=TEXT_SECONDARY, anchor="mm")
+    draw.text((remote_x, section_y + 120), "FTP :990  MQTT :8883", font=fonts['port_small'], fill=TEXT_SECONDARY, anchor="mm")
 
     # === INTERNET CLOUD ===
     draw_cloud_icon(draw, internet_x, section_y, 80, INTERNET_COLOR)
@@ -303,7 +303,7 @@ def create_diagram():
     draw_rounded_rect(draw, [bambuddy_x - 55, section_y + 85, bambuddy_x + 55, section_y + 130],
                       6, fill=(35, 35, 45), outline=CONTAINER_BORDER, width=1)
     draw.text((bambuddy_x, section_y + 98), "FTP", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
-    draw.text((bambuddy_x, section_y + 115), "9990", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
+    draw.text((bambuddy_x, section_y + 115), "990", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
 
     draw_rounded_rect(draw, [bambuddy_x - 55, section_y + 140, bambuddy_x + 55, section_y + 185],
                       6, fill=(35, 35, 45), outline=CONTAINER_BORDER, width=1)

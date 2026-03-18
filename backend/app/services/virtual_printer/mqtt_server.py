@@ -262,20 +262,6 @@ class SimpleMQTTServer:
                 except Exception as e:
                     logger.error("MQTT connection handler error: %s", e)
 
-            # Custom protocol factory to log raw connection attempts
-            logger.info("Setting up MQTT server with SSL error handling...")
-
-            # Add SSL handshake error callback
-            def handle_ssl_error(loop, context):
-                exception = context.get("exception")
-                message = context.get("message", "")
-                if "ssl" in str(exception).lower() or "ssl" in message.lower():
-                    logger.error("SSL error: %s - %s", message, exception)
-                else:
-                    logger.debug("Asyncio error: %s", message)
-
-            asyncio.get_event_loop().set_exception_handler(handle_ssl_error)
-
             self._server = await asyncio.start_server(
                 connection_handler,
                 self.bind_address,
