@@ -553,6 +553,7 @@ export interface ProjectStats {
   remaining_parts: number | null;  // Remaining parts
   bom_total_items: number;
   bom_completed_items: number;
+  bom_cost: number;
 }
 
 export interface ProjectChildPreview {
@@ -611,6 +612,7 @@ export interface ProjectListItem {
   status: string;
   target_count: number | null;  // Target number of plates/print jobs
   target_parts_count: number | null;  // Target number of parts/objects
+  budget: number | null;
   created_at: string;
   archive_count: number;  // Number of print jobs (plates)
   total_items: number;  // Sum of quantities (total items printed, including failed)
@@ -631,7 +633,7 @@ export interface ProjectCreate {
   tags?: string;
   due_date?: string;
   priority?: string;
-  budget?: number;
+  budget?: number | null;
   parent_id?: number;
 }
 
@@ -646,7 +648,7 @@ export interface ProjectUpdate {
   tags?: string;
   due_date?: string;
   priority?: string;
-  budget?: number;
+  budget?: number | null;
   parent_id?: number;
 }
 
@@ -732,7 +734,7 @@ export interface ProjectImport {
   tags?: string;
   due_date?: string;
   priority?: string;
-  budget?: number;
+  budget?: number | null;
   bom_items?: BOMItemExport[];
   linked_folders?: LinkedFolderExport[];
 }
