@@ -687,7 +687,7 @@ class VirtualPrinterManager:
                 )
                 self._instances[vp.id] = instance
                 await instance.start_proxy()
-                logger.info("Started proxy VP: %s → %s", instance.name, target_ip)
+                logger.info("Started proxy VP: %s → %s (bind=%s)", instance.name, target_ip, instance.bind_ip)
             else:
                 instance = VirtualPrinterInstance(
                     vp_id=vp.id,

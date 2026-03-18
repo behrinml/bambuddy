@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def detect_port_redirect(port: int) -> int | None:
     """Detect if iptables redirects a port to another port.
 
-    When iptables NAT REDIRECT rules exist (e.g. 990→9990), connections
+    When iptables NAT REDIRECT rules exist (e.g. port redirects), connections
     to the original port never reach our socket because iptables intercepts
     them in PREROUTING. We must listen on the redirect target instead.
 
@@ -1087,9 +1087,9 @@ class SlicerProxyManager:
         """Start FTP and MQTT TLS proxies."""
         logger.info("Starting slicer TLS proxy to %s", self.target_host)
 
-        # Detect iptables port redirect (e.g. 990→9990 for non-root installs).
-        # If active, connections to port 990 get intercepted by iptables PREROUTING
-        # and sent to the redirect target — our socket on 990 never sees them.
+        # Detect iptables port redirect (e.g. if an external redirect exists).
+        # If active, connections get intercepted by iptables PREROUTING
+        # and sent to the redirect target — our socket never sees them.
         ftp_listen_port = self.LOCAL_FTP_PORT
         redirect_target = detect_port_redirect(self.LOCAL_FTP_PORT)
         if redirect_target:

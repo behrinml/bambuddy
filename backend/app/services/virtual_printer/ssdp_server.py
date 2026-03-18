@@ -232,7 +232,13 @@ class VirtualPrinterSSDPServer:
         try:
             msg = self._build_notify_message()
             self._socket.sendto(msg, (SSDP_BROADCAST_ADDR, SSDP_PORT))
-            logger.debug("Sent SSDP NOTIFY for %s", self.name)
+            logger.debug(
+                "Sent SSDP NOTIFY for %s (Location=%s, USN=%s, bind=%s)",
+                self.name,
+                self._get_local_ip(),
+                self.serial,
+                self._bind_ip,
+            )
         except OSError as e:
             logger.debug("Failed to send NOTIFY for %s: %s", self.name, e)
 
@@ -278,7 +284,13 @@ class VirtualPrinterSSDPServer:
             try:
                 response = self._build_response_message()
                 self._socket.sendto(response, addr)
-                logger.info("Sent SSDP response to %s for virtual printer '%s'", addr[0], self.name)
+                logger.info(
+                    "Sent SSDP response to %s for '%s' (Location=%s, USN=%s)",
+                    addr[0],
+                    self.name,
+                    self._get_local_ip(),
+                    self.serial,
+                )
             except OSError as e:
                 logger.debug("Failed to send SSDP response for %s: %s", self.name, e)
 
