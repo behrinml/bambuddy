@@ -515,8 +515,8 @@ export function ConfigureAmsSlotModal({
         const isSavedPreset = savedId === cp.setting_id;
         const isCurrentPreset = isSavedPreset
           || (trayIdx && (cp.setting_id === trayIdx || convertToTrayInfoIdx(cp.setting_id) === trayIdx));
-        // Only the exact saved preset bypasses search — trayIdx matches are too broad
-        if (!isSavedPreset && query && !cp.name.toLowerCase().includes(query)) continue;
+        // Search filter applies to ALL presets (including saved) — no bypass
+        if (query && !cp.name.toLowerCase().includes(query)) continue;
         // Filter by printer model if set (skip for current preset)
         if (!isCurrentPreset && printerModel) {
           const presetModel = extractPresetModel(cp.name);
@@ -530,8 +530,7 @@ export function ConfigureAmsSlotModal({
     if (localPresets?.filament) {
       for (const lp of localPresets.filament) {
         const localId = `local_${lp.id}`;
-        const isSaved = savedId === localId;
-        if (!isSaved && query && !lp.name.toLowerCase().includes(query)) continue;
+        if (query && !lp.name.toLowerCase().includes(query)) continue;
         items.push({ id: localId, name: lp.name, source: 'local', isUser: false });
       }
     }
