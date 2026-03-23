@@ -37,6 +37,30 @@ def _get_ip() -> str:
         return "unknown"
 
 
+def _deploy_ssh_key(public_key: str) -> None:
+    """Write Bambuddy's SSH public key to authorized_keys if not already present."""
+    home = Path.home()
+    ssh_dir = home / ".ssh"
+    auth_keys = ssh_dir / "authorized_keys"
+
+    try:
+        ssh_dir.mkdir(mode=0o700, exist_ok=True)
+
+        # Check if key already deployed
+        if auth_keys.exists():
+            existing = auth_keys.read_text()
+            if public_key.strip() in existing:
+                return
+
+        # Append key
+        with auth_keys.open("a") as f:
+            f.write(public_key.strip() + "\n")
+        auth_keys.chmod(0o600)
+        logger.info("SSH public key deployed to %s", auth_keys)
+    except Exception as e:
+        logger.warning("Failed to deploy SSH key: %s", e)
+
+
 async def nfc_poll_loop(config: Config, api: APIClient, shared: dict):
     """Continuous NFC polling loop — runs in asyncio with blocking reads offloaded."""
     nfc: NFCReader = shared["nfc"]
@@ -225,6 +249,11 @@ async def main():
         config.tare_offset = reg.get("tare_offset", config.tare_offset)
         config.calibration_factor = reg.get("calibration_factor", config.calibration_factor)
         scale.update_calibration(config.tare_offset, config.calibration_factor)
+
+        # Auto-deploy Bambuddy's SSH public key for remote updates
+        ssh_key = reg.get("ssh_public_key")
+        if ssh_key:
+            _deploy_ssh_key(ssh_key)
 
     logger.info("Device registered, starting poll loops")
 

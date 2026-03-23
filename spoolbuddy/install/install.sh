@@ -435,34 +435,17 @@ setup_ssh_key() {
     mkdir -p "$ssh_dir"
     chmod 700 "$ssh_dir"
 
-    # Get the public key from flag, prompt, or skip
-    local pubkey="$SSH_PUBKEY"
-
-    if [[ -z "$pubkey" && "$NON_INTERACTIVE" != "true" ]]; then
-        echo ""
-        echo -e "${BOLD}SSH Public Key for Remote Updates${NC}"
-        echo ""
-        echo "  Bambuddy can update SpoolBuddy remotely over SSH."
-        echo "  To enable this, paste the SSH public key from:"
-        echo "    Bambuddy → SpoolBuddy Settings → SSH Setup"
-        echo ""
-        echo "  (You can also set this up later by re-running the installer"
-        echo "   with --ssh-pubkey or by manually adding the key)"
-        echo ""
-        read -rp "  Paste SSH public key (or press Enter to skip): " pubkey
-    fi
-
-    if [[ -n "$pubkey" ]]; then
-        # Append key if not already present
-        if [[ -f "$auth_keys" ]] && grep -qF "$pubkey" "$auth_keys" 2>/dev/null; then
+    if [[ -n "$SSH_PUBKEY" ]]; then
+        # Manual key provided via --ssh-pubkey flag
+        if [[ -f "$auth_keys" ]] && grep -qF "$SSH_PUBKEY" "$auth_keys" 2>/dev/null; then
             info "SSH key already present in authorized_keys"
         else
-            echo "$pubkey" >> "$auth_keys"
+            echo "$SSH_PUBKEY" >> "$auth_keys"
             success "SSH public key added"
         fi
     else
-        info "No SSH key provided, skipping (can be added later)"
-        # Ensure the file exists even if empty
+        # No manual key — the daemon will auto-deploy it on first registration
+        info "SSH key will be deployed automatically when the daemon connects to Bambuddy"
         touch "$auth_keys"
     fi
 

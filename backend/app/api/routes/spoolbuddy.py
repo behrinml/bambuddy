@@ -131,7 +131,17 @@ async def register_device(
         }
     )
 
-    return _device_to_response(device)
+    response = _device_to_response(device)
+
+    # Include SSH public key so the daemon can auto-deploy it
+    try:
+        from backend.app.services.spoolbuddy_ssh import get_public_key
+
+        response.ssh_public_key = await get_public_key()
+    except Exception:
+        pass  # Key not generated yet — daemon can still work without it
+
+    return response
 
 
 @router.get("/devices", response_model=list[DeviceResponse])
