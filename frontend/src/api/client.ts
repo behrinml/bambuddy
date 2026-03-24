@@ -4996,6 +4996,7 @@ export interface SpoolBuddyDevice {
   device_id: string;
   hostname: string;
   ip_address: string;
+  backend_url?: string | null;
   firmware_version: string | null;
   has_nfc: boolean;
   has_scale: boolean;
@@ -5055,6 +5056,12 @@ export const spoolbuddyApi = {
       body: JSON.stringify({ brightness, blank_timeout: blankTimeout }),
     }),
 
+  updateSystemConfig: (deviceId: string, backendUrl: string, apiKey?: string) =>
+    request<{ status: string; message: string }>(`/spoolbuddy/devices/${deviceId}/system/config`, {
+      method: 'POST',
+      body: JSON.stringify({ backend_url: backendUrl, ...(apiKey ? { api_key: apiKey } : {}) }),
+    }),
+
   checkDaemonUpdate: (deviceId: string) =>
     request<DaemonUpdateCheck>(`/spoolbuddy/devices/${deviceId}/update-check`),
 
@@ -5078,6 +5085,18 @@ export const spoolbuddyApi = {
       method: 'POST',
       body: '{}',
     }),
+
+  queueDiagnostics: (deviceId: string, type: 'nfc' | 'scale' | 'read_tag') =>
+    request<{ status: string; diagnostic: string; message: string }>(
+      `/spoolbuddy/diagnostics/${deviceId}/run?diagnostic=${type}`,
+      { method: 'POST', body: '{}' }
+    ),
+
+  getDiagnosticResult: (deviceId: string, type: 'nfc' | 'scale' | 'read_tag') =>
+    request<{ diagnostic: string; success: boolean; output: string; exit_code: number }>(
+      `/spoolbuddy/diagnostics/${deviceId}/result?diagnostic=${type}`,
+      { method: 'GET' }
+    ),
 };
 
 export interface BugReportRequest {

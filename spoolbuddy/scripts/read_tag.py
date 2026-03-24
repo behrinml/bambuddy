@@ -12,15 +12,30 @@ Key learnings from pico-nfc-bridge.ino:
 
 import hashlib
 import hmac
+import os
 import sys
 import time
 
 import gpiod
 import spidev
 
-BUSY_PIN = 25
-RST_PIN = 24
-NSS_PIN = 23  # Manual CS (moved from GPIO8)
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+BUSY_PIN = _env_int("SPOOLBUDDY_NFC_BUSY_PIN", 25)
+RST_PIN = _env_int("SPOOLBUDDY_NFC_RST_PIN", 24)
+NSS_PIN = _env_int("SPOOLBUDDY_NFC_NSS_PIN", 23)  # Manual CS by default
+SPI_BUS = _env_int("SPOOLBUDDY_NFC_SPI_BUS", 0)
+SPI_DEVICE = _env_int("SPOOLBUDDY_NFC_SPI_DEVICE", 0)
+SPI_SPEED_HZ = _env_int("SPOOLBUDDY_NFC_SPI_SPEED_HZ", 500_000)
 
 # Bambu Lab MIFARE Classic key derivation constants (from pico-nfc-bridge.ino)
 BAMBU_MASTER_KEY = bytes(
@@ -102,8 +117,8 @@ class PN5180:
             },
         )
         self._spi = spidev.SpiDev()
-        self._spi.open(0, 0)
-        self._spi.max_speed_hz = 500_000  # 500kHz like Pico firmware
+        self._spi.open(SPI_BUS, SPI_DEVICE)
+        self._spi.max_speed_hz = SPI_SPEED_HZ
         self._spi.mode = 0b00
         self._spi.no_cs = True
 
@@ -547,7 +562,36 @@ def main():
     print("  Supports: Bambu (MIFARE Classic) + NTAG (SpoolEase/OpenPrintTag)")
     print("=" * 60)
 
-    nfc = PN5180()
+    try:
+        nfc = PN5180()
+    except (OSError, RuntimeError, PermissionError) as e:
+        print(f"\nERROR: Failed to initialize NFC reader: {e}")
+
+        # Check if it's a resource conflict
+        error_str = str(e).lower()
+        is_resource_conflict = any(x in error_str for x in ["busy", "resource", "already in use", "permission denied"])
+
+        if is_resource_conflict:
+            print("\nGPIO/SPI RESOURCE IN USE: Another process is using the NFC reader.")
+            print("This typically means the SpoolBuddy daemon is already reading tags.")
+            print("\nTo run this diagnostic, stop the daemon first:")
+            print("  sudo systemctl stop bambuddy")
+            print("  # Run diagnostic")
+            print("  .../read_tag.py")
+            print("  # Restart daemon when done:")
+            print("  sudo systemctl start bambuddy")
+        else:
+            print("\nCheck:")
+            print("  - Correct GPIO chip is available (/dev/gpiochip0 or /dev/gpiochip4)")
+            print(f"  - SPI device is available (SPI_BUS={SPI_BUS}, SPI_DEVICE={SPI_DEVICE})")
+            print("  - GPIO and SPI permissions are correct")
+            # Only print full traceback for unexpected errors
+            import traceback
+
+            traceback.print_exc()
+
+        sys.exit(1)
+
     try:
         nfc.reset()
         ver = nfc.read_eeprom(0x10, 2)

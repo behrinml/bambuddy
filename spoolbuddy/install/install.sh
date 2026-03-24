@@ -12,6 +12,8 @@
 #
 # Options:
 #   --mode MODE          Installation mode: "spoolbuddy" (companion only) or "full" (both)
+#   --repo URL           Git repository URL to install from (default: upstream repo)
+#   --ref REF            Git ref to install (branch/tag/commit, default: main)
 #   --bambuddy-url URL   Bambuddy server URL (required for spoolbuddy mode)
 #   --api-key KEY        Bambuddy API key (required for spoolbuddy mode)
 #   --path PATH          Installation directory (default: /opt/spoolbuddy or /opt/bambuddy)
@@ -50,6 +52,10 @@ SPOOLBUDDY_PIP_PACKAGES="spidev gpiod smbus2 httpx"
 
 INSTALL_MODE=""          # "spoolbuddy" or "full"
 INSTALL_PATH=""
+INSTALL_REPO=""
+INSTALL_REF=""
+DETECTED_INSTALLER_REPO=""
+DETECTED_INSTALLER_REF=""
 BAMBUDDY_URL=""
 API_KEY=""
 BAMBUDDY_PORT="8000"
@@ -188,6 +194,8 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --mode MODE          \"spoolbuddy\" (companion only) or \"full\" (Bambuddy + SpoolBuddy)"
+    echo "  --repo URL           Git repository URL to install from"
+    echo "  --ref REF            Git ref to install (branch/tag/commit)"
     echo "  --bambuddy-url URL   Bambuddy server URL (required for spoolbuddy mode)"
     echo "  --api-key KEY        Bambuddy API key (required for spoolbuddy mode)"
     echo "  --path PATH          Installation directory (default: /opt/spoolbuddy or /opt/bambuddy)"
@@ -206,6 +214,70 @@ show_help() {
     echo "  Full install (unattended):"
     echo "    sudo ./install.sh --mode full --port 8000 -y"
     exit 0
+}
+
+normalize_github_repo_url() {
+    local url="$1"
+    if [[ -z "$url" ]]; then
+        echo ""
+        return
+    fi
+
+    # Convert git@github.com:owner/repo(.git) to https://github.com/owner/repo.git
+    if [[ "$url" =~ ^git@github.com:(.+)$ ]]; then
+        url="https://github.com/${BASH_REMATCH[1]}"
+    fi
+
+    # Keep remote URL style consistent.
+    url="${url%.git}"
+    echo "${url}.git"
+}
+
+detect_installer_source_context() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if git -C "$script_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        DETECTED_INSTALLER_REF="$(git -C "$script_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        local origin_url
+        origin_url="$(git -C "$script_dir" remote get-url origin 2>/dev/null || true)"
+        DETECTED_INSTALLER_REPO="$(normalize_github_repo_url "$origin_url")"
+    fi
+
+    # Optional environment overrides for raw-download installs.
+    if [[ -n "${SPOOLBUDDY_INSTALL_REPO:-}" ]]; then
+        DETECTED_INSTALLER_REPO="$(normalize_github_repo_url "$SPOOLBUDDY_INSTALL_REPO")"
+    fi
+    if [[ -n "${SPOOLBUDDY_INSTALL_REF:-}" ]]; then
+        DETECTED_INSTALLER_REF="$SPOOLBUDDY_INSTALL_REF"
+    fi
+
+    if [[ -z "$INSTALL_REPO" ]]; then
+        if [[ -n "$DETECTED_INSTALLER_REPO" ]]; then
+            INSTALL_REPO="$DETECTED_INSTALLER_REPO"
+        else
+            INSTALL_REPO="$GITHUB_REPO"
+        fi
+    fi
+
+    if [[ -z "$INSTALL_REF" ]]; then
+        if [[ -n "$DETECTED_INSTALLER_REF" && "$DETECTED_INSTALLER_REF" != "HEAD" ]]; then
+            INSTALL_REF="$DETECTED_INSTALLER_REF"
+        else
+            INSTALL_REF="main"
+        fi
+    fi
+}
+
+resolve_install_ref() {
+    local ref="$1"
+    # If ref exists on origin as a branch, track/reset it. Otherwise treat it as tag/commit.
+    if git ls-remote --exit-code --heads origin "$ref" >/dev/null 2>&1; then
+        git checkout -B "$ref" "origin/$ref" > /dev/null 2>&1
+        git reset --hard "origin/$ref" > /dev/null 2>&1
+    else
+        git checkout "$ref" > /dev/null 2>&1
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -312,21 +384,32 @@ configure_boot_config() {
 
     if [[ ! -f "$boot_config" ]]; then
         warn "Boot config not found at /boot/firmware/config.txt or /boot/config.txt"
-        warn "You may need to manually add: dtparam=i2c_vc=on and dtoverlay=spi0-0cs"
+        warn "You may need to manually add: dtparam=i2c_arm=on and dtoverlay=spi0-0cs"
         return
     fi
 
     info "Configuring $boot_config..."
 
-    # Enable I2C bus 0 (GPIO0/GPIO1) for NAU7802 scale
-    if ! grep -q "^dtparam=i2c_vc=on" "$boot_config"; then
-        echo "" >> "$boot_config"
-        echo "# SpoolBuddy: I2C bus 0 for NAU7802 scale (GPIO0/GPIO1)" >> "$boot_config"
-        echo "dtparam=i2c_vc=on" >> "$boot_config"
+    # Migrate legacy SpoolBuddy setting (bus 0 / i2c_vc) to bus 1 / i2c_arm.
+    if grep -q "^dtparam=i2c_vc=on" "$boot_config"; then
+        sed -i "s/^dtparam=i2c_vc=on$/# dtparam=i2c_vc=on (disabled by SpoolBuddy installer; use i2c_arm bus 1)/" "$boot_config"
         REBOOT_NEEDED="true"
-        success "Added dtparam=i2c_vc=on"
+        success "Disabled legacy dtparam=i2c_vc=on"
+    fi
+
+    if grep -q "^# SpoolBuddy: I2C bus 0 for NAU7802 scale (GPIO0/GPIO1)" "$boot_config"; then
+        sed -i "s/^# SpoolBuddy: I2C bus 0 for NAU7802 scale (GPIO0\/GPIO1)$/# SpoolBuddy: I2C bus 1 for NAU7802 scale (GPIO2\/GPIO3)/" "$boot_config"
+    fi
+
+    # Ensure I2C bus 1 (GPIO2/GPIO3) is enabled for NAU7802 scale
+    if ! grep -q "^dtparam=i2c_arm=on" "$boot_config"; then
+        echo "" >> "$boot_config"
+        echo "# SpoolBuddy: I2C bus 1 for NAU7802 scale (GPIO2/GPIO3)" >> "$boot_config"
+        echo "dtparam=i2c_arm=on" >> "$boot_config"
+        REBOOT_NEEDED="true"
+        success "Added dtparam=i2c_arm=on"
     else
-        success "dtparam=i2c_vc=on already set"
+        success "dtparam=i2c_arm=on already set"
     fi
 
     # Disable SPI auto chip-select (manual CS on GPIO23 for PN5180)
@@ -388,11 +471,14 @@ download_spoolbuddy() {
         info "Existing installation found, updating..."
         git config --global --add safe.directory "$INSTALL_PATH" 2>/dev/null || true
         cd "$INSTALL_PATH"
+        git remote set-url origin "$INSTALL_REPO" 2>/dev/null || true
         run_with_progress "Fetching updates" git fetch origin
-        git reset --hard origin/main > /dev/null 2>&1
+        resolve_install_ref "$INSTALL_REF"
     else
         mkdir -p "$INSTALL_PATH"
-        run_with_progress "Cloning repository" git clone "$GITHUB_REPO" "$INSTALL_PATH"
+        run_with_progress "Cloning repository" git clone "$INSTALL_REPO" "$INSTALL_PATH"
+        cd "$INSTALL_PATH"
+        resolve_install_ref "$INSTALL_REF"
     fi
 
     chown -R "$SPOOLBUDDY_SERVICE_USER:$SPOOLBUDDY_SERVICE_USER" "$INSTALL_PATH"
@@ -422,11 +508,44 @@ SPOOLBUDDY_BACKEND_URL=$BAMBUDDY_URL
 
 # API key (create one in Bambuddy Settings -> API Keys)
 SPOOLBUDDY_API_KEY=$API_KEY
+
+# NAU7802 scale bus (RPi GPIO2/GPIO3)
+SPOOLBUDDY_I2C_BUS=1
 EOF
 
     chown "$SPOOLBUDDY_SERVICE_USER:$SPOOLBUDDY_SERVICE_USER" "$env_file"
-    chmod 600 "$env_file"
+    # Keep secrets owner-writable while allowing kiosk user (in spoolbuddy group)
+    # to read backend URL/API key for dynamic launcher URL resolution.
+    chgrp "$SPOOLBUDDY_SERVICE_USER" "$env_file"
+    chmod 640 "$env_file"
     success "Configuration saved to $env_file"
+}
+
+ensure_kiosk_env_access() {
+    local env_file="$INSTALL_PATH/spoolbuddy/.env"
+
+    if [[ ! -f "$env_file" ]]; then
+        warn "SpoolBuddy env file not found at $env_file"
+        return
+    fi
+
+    # Ensure kiosk user is known even when this function is called outside setup_kiosk.
+    if [[ -z "$KIOSK_USER" ]]; then
+        KIOSK_USER="${SUDO_USER:-$(logname 2>/dev/null || echo pi)}"
+    fi
+
+    if id "$KIOSK_USER" &>/dev/null; then
+        usermod -aG "$SPOOLBUDDY_SERVICE_USER" "$KIOSK_USER" 2>/dev/null || true
+    fi
+
+    chgrp "$SPOOLBUDDY_SERVICE_USER" "$env_file"
+    chmod 640 "$env_file"
+
+    if ! su -s /bin/sh -c "test -r '$env_file'" "$KIOSK_USER"; then
+        error "Kiosk user '$KIOSK_USER' cannot read $env_file (required for dynamic kiosk URL). Check groups/permissions."
+    fi
+
+    success "Verified kiosk user '$KIOSK_USER' can read SpoolBuddy env"
 }
 
 setup_ssh_key() {
@@ -692,6 +811,15 @@ setup_kiosk() {
     info "Kiosk user: $KIOSK_USER (home: $KIOSK_HOME)"
     info "Kiosk URL:  $KIOSK_URL"
 
+    # Allow kiosk user to read SpoolBuddy env so launcher can resolve backend URL
+    # and API key dynamically instead of using stale install-time fallback values.
+    local spoolbuddy_env="$INSTALL_PATH/spoolbuddy/.env"
+    if [[ -f "$spoolbuddy_env" ]]; then
+        usermod -aG "$SPOOLBUDDY_SERVICE_USER" "$KIOSK_USER" 2>/dev/null || true
+        chgrp "$SPOOLBUDDY_SERVICE_USER" "$spoolbuddy_env" 2>/dev/null || true
+        chmod 640 "$spoolbuddy_env" 2>/dev/null || true
+    fi
+
     # ── Install kiosk packages ────────────────────────────────────────────
     run_with_progress "Installing kiosk packages" apt-get install -y labwc chromium plymouth wlr-randr
 
@@ -850,19 +978,61 @@ EOF
 </labwc_config>
 EOF
 
-    # ── labwc autostart ───────────────────────────────────────────────────
-    cat > "$labwc_dir/autostart" << EOF
+        # ── kiosk launcher (dynamic URL from spoolbuddy/.env) ─────────────────
+        local kiosk_launcher="/usr/local/bin/spoolbuddy-kiosk-launch"
+        cat > "$kiosk_launcher" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="$INSTALL_PATH/spoolbuddy/.env"
+FALLBACK_URL="$KIOSK_URL"
+
+backend_url=""
+api_key=""
+
+if [[ -r "\$ENV_FILE" ]]; then
+    backend_url="\$(sed -n 's/^SPOOLBUDDY_BACKEND_URL=//p' "\$ENV_FILE" | tail -n1 | tr -d '\r')"
+    api_key="\$(sed -n 's/^SPOOLBUDDY_API_KEY=//p' "\$ENV_FILE" | tail -n1 | tr -d '\r')"
+    backend_url="\${backend_url%\"}"
+    backend_url="\${backend_url#\"}"
+    api_key="\${api_key%\"}"
+    api_key="\${api_key#\"}"
+elif [[ -f "\$ENV_FILE" ]]; then
+    echo "spoolbuddy-kiosk-launch: ERROR: \$ENV_FILE exists but is not readable" >&2
+    echo "spoolbuddy-kiosk-launch: Fix permissions (group-readable by kiosk user) and restart kiosk" >&2
+    exit 1
+fi
+
+if [[ -n "\$backend_url" && -n "\$api_key" ]]; then
+    backend_url="\${backend_url%/}"
+    kiosk_url="\${backend_url}/spoolbuddy?token=\${api_key}"
+else
+    kiosk_url="\$FALLBACK_URL"
+fi
+
+exec chromium --kiosk --no-first-run --disable-infobars \
+    --disable-session-crashed-bubble --disable-features=TranslateUI \
+    --noerrdialogs --disable-component-update \
+    --overscroll-history-navigation=0 \
+    --ozone-platform=wayland \
+    "\$kiosk_url"
+EOF
+
+        chmod 755 "$kiosk_launcher"
+
+        # Tiny self-check: ensure sed command substitutions were not expanded
+        # while generating the launcher script.
+        if ! grep -Fq 'backend_url="$(sed -n' "$kiosk_launcher" || ! grep -Fq 'api_key="$(sed -n' "$kiosk_launcher"; then
+            error "Kiosk launcher generation failed: dynamic env parsing commands were expanded unexpectedly"
+        fi
+
+        # ── labwc autostart ───────────────────────────────────────────────────
+        cat > "$labwc_dir/autostart" << EOF
 # Force 1024x600 (panel doesn't advertise this natively)
 wlr-randr --output HDMI-A-1 --custom-mode 1024x600@60 &
 
-# Launch Chromium in kiosk mode (virtual keyboard is embedded in the web app)
-chromium --kiosk --no-first-run --disable-infobars \\
-  --disable-session-crashed-bubble --disable-features=TranslateUI \\
-  --noerrdialogs --disable-component-update \\
-  --disk-cache-size=0 \\
-  --overscroll-history-navigation=0 \\
-  --ozone-platform=wayland \\
-  $KIOSK_URL &
+# Launch Chromium via helper that resolves URL from spoolbuddy/.env
+$kiosk_launcher &
 EOF
 
     chown -R "$KIOSK_USER:$KIOSK_USER" "$labwc_dir"
@@ -895,6 +1065,14 @@ parse_args() {
         case "$1" in
             --mode)
                 INSTALL_MODE="$2"
+                shift 2
+                ;;
+            --repo)
+                INSTALL_REPO="$(normalize_github_repo_url "$2")"
+                shift 2
+                ;;
+            --ref)
+                INSTALL_REF="$2"
                 shift 2
                 ;;
             --bambuddy-url)
@@ -973,6 +1151,47 @@ gather_config() {
     fi
     prompt "Installation directory" "$INSTALL_PATH" INSTALL_PATH
 
+    if [[ -z "$INSTALL_REPO" ]]; then
+        INSTALL_REPO="$GITHUB_REPO"
+    fi
+    prompt "Git repository URL" "$INSTALL_REPO" INSTALL_REPO
+    INSTALL_REPO="$(normalize_github_repo_url "$INSTALL_REPO")"
+
+    if [[ -z "$INSTALL_REF" ]]; then
+        INSTALL_REF="main"
+    fi
+
+    if [[ "$NON_INTERACTIVE" != "true" && -n "$DETECTED_INSTALLER_REF" && "$DETECTED_INSTALLER_REF" != "HEAD" ]]; then
+        echo ""
+        echo -e "${BOLD}Install Source Ref${NC}"
+        echo "1) main"
+        echo "2) $DETECTED_INSTALLER_REF (detected from installer context)"
+        echo "3) custom"
+        while true; do
+            echo -en "${BOLD}Choose${NC} [1/2/3]: "
+            read -r ref_choice
+            case "$ref_choice" in
+                ""|1)
+                    INSTALL_REF="main"
+                    break
+                    ;;
+                2)
+                    INSTALL_REF="$DETECTED_INSTALLER_REF"
+                    break
+                    ;;
+                3)
+                    prompt "Git ref (branch/tag/commit)" "$INSTALL_REF" INSTALL_REF
+                    break
+                    ;;
+                *)
+                    echo "Please enter 1, 2, or 3."
+                    ;;
+            esac
+        done
+    else
+        prompt "Git ref (branch/tag/commit)" "$INSTALL_REF" INSTALL_REF
+    fi
+
     if [[ "$INSTALL_MODE" == "spoolbuddy" ]]; then
         # Need remote Bambuddy URL and API key
         echo ""
@@ -1010,6 +1229,8 @@ gather_config() {
     echo -e "${CYAN}─────────────────────────────────────────${NC}"
     echo -e "  Mode:           ${GREEN}$([ "$INSTALL_MODE" == "full" ] && echo "Bambuddy + SpoolBuddy" || echo "SpoolBuddy only")${NC}"
     echo -e "  Install path:   ${GREEN}$INSTALL_PATH${NC}"
+    echo -e "  Git repo:       ${GREEN}$INSTALL_REPO${NC}"
+    echo -e "  Git ref:        ${GREEN}$INSTALL_REF${NC}"
     if [[ "$INSTALL_MODE" == "full" ]]; then
         echo -e "  Bambuddy port:  ${GREEN}$BAMBUDDY_PORT${NC}"
         echo -e "  Bambuddy URL:   ${GREEN}$BAMBUDDY_URL${NC}"
@@ -1030,6 +1251,7 @@ gather_config() {
 
 main() {
     parse_args "$@"
+    detect_installer_source_context
 
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
@@ -1104,6 +1326,10 @@ main() {
     info "Setting up SpoolBuddy..."
     setup_spoolbuddy_venv
     create_spoolbuddy_env
+    # Kiosk env access: only needed if actual kiosk hardware is available
+    if [[ -f /boot/firmware/config.txt ]] || [[ -f /boot/config.txt ]]; then
+        ensure_kiosk_env_access
+    fi
     setup_ssh_key
     create_spoolbuddy_service
     echo ""

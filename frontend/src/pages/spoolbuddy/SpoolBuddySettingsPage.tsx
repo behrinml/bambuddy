@@ -4,6 +4,10 @@ import { useOutletContext } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { SpoolBuddyOutletContext } from '../../components/spoolbuddy/SpoolBuddyLayout';
 import { spoolbuddyApi, type SpoolBuddyDevice } from '../../api/client';
+import { DiagnosticModal } from '../../components/spoolbuddy/DiagnosticModal';
+import { FileText, Wand2, Zap } from 'lucide-react';
+
+
 function formatUptime(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -36,6 +40,39 @@ const BLANK_OPTIONS = [
 
 function DeviceTab({ device }: { device: SpoolBuddyDevice }) {
   const { t } = useTranslation();
+  const [diagnosticOpen, setDiagnosticOpen] = useState<'nfc' | 'scale' | 'read_tag' | null>(null);
+  const [backendUrl, setBackendUrl] = useState('');
+  const [apiToken, setApiToken] = useState('');
+  const [systemBusy, setSystemBusy] = useState(false);
+  const [systemMsg, setSystemMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!backendUrl && device.backend_url) {
+      setBackendUrl(device.backend_url);
+    }
+  }, [device.backend_url, backendUrl]);
+
+  const saveConfig = async () => {
+    if (!backendUrl.trim()) {
+      setSystemMsg({ type: 'error', text: t('spoolbuddy.settings.systemFieldsRequired', 'Backend URL is required.') });
+      return;
+    }
+
+    setSystemBusy(true);
+    setSystemMsg(null);
+    try {
+      await spoolbuddyApi.updateSystemConfig(
+        device.device_id,
+        backendUrl.trim(),
+        apiToken.trim() || undefined
+      );
+      setSystemMsg({ type: 'ok', text: t('spoolbuddy.settings.systemQueued', 'Config queued.') });
+    } catch (e) {
+      setSystemMsg({ type: 'error', text: e instanceof Error ? e.message : t('common.error', 'Error') });
+    } finally {
+      setSystemBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -124,6 +161,116 @@ function DeviceTab({ device }: { device: SpoolBuddyDevice }) {
         <span className="text-zinc-500">Device ID</span>
         <span className="text-zinc-400 font-mono">{device.device_id}</span>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Backend/Auth Config */}
+        <div className="bg-zinc-800 rounded-lg p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-zinc-300">
+            {t('spoolbuddy.settings.systemConfig', 'Backend & Auth')}
+          </h3>
+
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-500 block">
+              {t('spoolbuddy.settings.backendUrl', 'Bambuddy Backend URL')}
+            </label>
+            <input
+              value={backendUrl}
+              onChange={(e) => setBackendUrl(e.target.value)}
+              placeholder="http://192.168.1.100:5000"
+              className="w-full px-3 py-2 rounded bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-500 block">
+              {t('spoolbuddy.settings.apiToken', 'API Token')}
+            </label>
+            <input
+              type="password"
+              value={apiToken}
+              onChange={(e) => setApiToken(e.target.value)}
+              placeholder={t('spoolbuddy.settings.apiTokenPlaceholder', 'Enter API token')}
+              className="w-full px-3 py-2 rounded bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={saveConfig}
+              disabled={systemBusy}
+              className="px-3 py-2 rounded bg-green-700 hover:bg-green-600 disabled:bg-zinc-700 text-sm font-medium text-zinc-100"
+            >
+              {t('spoolbuddy.settings.saveConfig', 'Save Config')}
+            </button>
+          </div>
+
+          {systemMsg && (
+            <div className={`text-xs ${systemMsg.type === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+              {systemMsg.text}
+            </div>
+          )}
+        </div>
+
+        {/* Diagnostic Buttons */}
+        <div className="bg-zinc-800 rounded-lg p-4 space-y-3">
+          {/* NFC Diagnostic Button */}
+          <button
+            onClick={() => setDiagnosticOpen('nfc')}
+            className="w-full bg-blue-700 hover:bg-blue-600 transition-colors rounded-lg p-3 text-left"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Wand2 className="w-4 h-4 text-blue-300" />
+              <span className="text-sm font-semibold text-blue-100">
+                {t('spoolbuddy.settings.nfcDiagnostic', 'NFC Diagnostic')}
+              </span>
+            </div>
+            <p className="text-xs text-blue-200/70">
+              {t('spoolbuddy.settings.testNfc', 'Test reader')}
+            </p>
+          </button>
+
+          {/* Scale Diagnostic Button */}
+          <button
+            onClick={() => setDiagnosticOpen('scale')}
+            className="w-full bg-yellow-700 hover:bg-yellow-600 transition-colors rounded-lg p-3 text-left"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Zap className="w-4 h-4 text-yellow-300" />
+              <span className="text-sm font-semibold text-yellow-100">
+                {t('spoolbuddy.settings.scaleDiagnostic', 'Scale Diagnostic')}
+              </span>
+            </div>
+            <p className="text-xs text-yellow-200/70">
+              {t('spoolbuddy.settings.testScale', 'Test accuracy')}
+            </p>
+          </button>
+
+          {/* Read Tag Diagnostic Button */}
+          <button
+            onClick={() => setDiagnosticOpen('read_tag')}
+            className="w-full bg-emerald-700 hover:bg-emerald-600 transition-colors rounded-lg p-3 text-left"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <FileText className="w-4 h-4 text-emerald-300" />
+              <span className="text-sm font-semibold text-emerald-100">
+                {t('spoolbuddy.settings.readTagDiagnostic', 'Read Tag Diagnostic')}
+              </span>
+            </div>
+            <p className="text-xs text-emerald-200/70">
+              {t('spoolbuddy.settings.testReadTag', 'Run read_tag.py')}
+            </p>
+          </button>
+        </div>
+      </div>
+
+      {/* Diagnostic Modal */}
+      {diagnosticOpen && device && (
+        <DiagnosticModal
+          type={diagnosticOpen}
+          deviceId={device.device_id}
+          onClose={() => setDiagnosticOpen(null)}
+        />
+      )}
     </div>
   );
 }

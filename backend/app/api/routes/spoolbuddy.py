@@ -1,8 +1,11 @@
 """SpoolBuddy device management API routes."""
 
 import asyncio
+import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -18,12 +21,15 @@ from backend.app.schemas.spoolbuddy import (
     CalibrationResponse,
     DeviceRegisterRequest,
     DeviceResponse,
+    DiagnosticResultRequest,
     DisplaySettingsRequest,
     HeartbeatRequest,
     HeartbeatResponse,
     ScaleReadingRequest,
     SetCalibrationFactorRequest,
     SetTareRequest,
+    SystemCommandResultRequest,
+    SystemConfigRequest,
     TagRemovedRequest,
     TagScannedRequest,
     UpdateSpoolWeightRequest,
@@ -37,6 +43,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/spoolbuddy", tags=["spoolbuddy"])
 
 OFFLINE_THRESHOLD_SECONDS = 30
+ONLINE_BROADCAST_INTERVAL_SECONDS = 10
+_spoolbuddy_online_last_broadcast: dict[str, float] = {}
+_diagnostic_results: dict[tuple[str, str], dict] = {}
 
 
 def _is_online(device: SpoolBuddyDevice) -> bool:
@@ -60,6 +69,7 @@ def _device_to_response(device: SpoolBuddyDevice) -> DeviceResponse:
         calibration_factor=device.calibration_factor,
         nfc_reader_type=device.nfc_reader_type,
         nfc_connection=device.nfc_connection,
+        backend_url=device.backend_url,
         display_brightness=device.display_brightness,
         display_blank_timeout=device.display_blank_timeout,
         has_backlight=device.has_backlight,
@@ -75,6 +85,19 @@ def _device_to_response(device: SpoolBuddyDevice) -> DeviceResponse:
         created_at=device.created_at,
         updated_at=device.updated_at,
     )
+
+
+def _should_broadcast_online(device_id: str, force: bool = False) -> bool:
+    if force:
+        _spoolbuddy_online_last_broadcast[device_id] = time.time()
+        return True
+
+    now_ts = time.time()
+    last_ts = _spoolbuddy_online_last_broadcast.get(device_id, 0.0)
+    if now_ts - last_ts >= ONLINE_BROADCAST_INTERVAL_SECONDS:
+        _spoolbuddy_online_last_broadcast[device_id] = now_ts
+        return True
+    return False
 
 
 # --- Device endpoints ---
@@ -99,6 +122,8 @@ async def register_device(
         device.has_scale = req.has_scale
         device.nfc_reader_type = req.nfc_reader_type
         device.nfc_connection = req.nfc_connection
+        if req.backend_url:
+            device.backend_url = req.backend_url
         device.has_backlight = req.has_backlight
         device.last_seen = now
         # Clear stale update status on re-registration (daemon restarted after update)
@@ -119,6 +144,7 @@ async def register_device(
             nfc_reader_type=req.nfc_reader_type,
             nfc_connection=req.nfc_connection,
             has_backlight=req.has_backlight,
+            backend_url=req.backend_url,
             last_seen=now,
         )
         db.add(device)
@@ -127,6 +153,7 @@ async def register_device(
     await db.commit()
     await db.refresh(device)
 
+    _spoolbuddy_online_last_broadcast[device.device_id] = time.time()
     await ws_manager.broadcast(
         {
             "type": "spoolbuddy_online",
@@ -187,25 +214,37 @@ async def device_heartbeat(
         device.nfc_reader_type = req.nfc_reader_type
     if req.nfc_connection:
         device.nfc_connection = req.nfc_connection
+    if req.backend_url:
+        device.backend_url = req.backend_url
 
     # Return and clear pending command
     pending = device.pending_command
     pending_write = None
+    pending_system = None
     if pending == "write_tag" and device.pending_write_payload:
         # Parse the stored JSON payload to include in response
-        import json
-
         try:
             pending_write = json.loads(device.pending_write_payload)
         except (json.JSONDecodeError, TypeError):
             pending_write = None
         # Don't clear write_tag command — it gets cleared by write-result
+    elif pending == "apply_system_config" and device.pending_system_payload:
+        try:
+            pending_system = json.loads(device.pending_system_payload)
+        except (json.JSONDecodeError, TypeError):
+            pending_system = None
+        # Don't clear config command — it gets cleared by daemon command-result callback
+    elif pending and pending.startswith("run_") and pending.endswith("_diag"):
+        # Don't clear diagnostic commands — they get cleared by the device reporting results
+        pass
     else:
         device.pending_command = None
 
     await db.commit()
 
-    if was_offline:
+    # Emit online presence on offline->online transitions immediately, and
+    # periodically while online so newly connected UIs can bootstrap state.
+    if _should_broadcast_online(device.device_id, force=was_offline):
         await ws_manager.broadcast(
             {
                 "type": "spoolbuddy_online",
@@ -213,10 +252,13 @@ async def device_heartbeat(
                 "hostname": device.hostname,
             }
         )
+    if was_offline:
+        logger.info("SpoolBuddy device back online: %s", device.device_id)
 
     return HeartbeatResponse(
         pending_command=pending,
         pending_write_payload=pending_write,
+        pending_system_payload=pending_system,
         tare_offset=device.tare_offset,
         calibration_factor=device.calibration_factor,
         display_brightness=device.display_brightness,
@@ -266,7 +308,15 @@ async def nfc_tag_scanned(
                 "tag_type": req.tag_type,
             }
         )
-        logger.info("SpoolBuddy unknown tag: %s", req.tag_uid)
+        logger.info(
+            "SpoolBuddy unknown tag: uid=%s (len=%d), tray_uuid=%s (len=%d), type=%s, sak=%s",
+            req.tag_uid,
+            len(req.tag_uid or ""),
+            req.tray_uuid,
+            len(req.tray_uuid or ""),
+            req.tag_type,
+            req.sak,
+        )
 
     return {"status": "ok", "matched": spool is not None, "spool_id": spool.id if spool else None}
 
@@ -580,6 +630,173 @@ async def update_display_settings(
         req.blank_timeout,
     )
     return {"status": "ok", "brightness": req.brightness, "blank_timeout": req.blank_timeout}
+
+
+@router.post("/devices/{device_id}/system/config")
+async def queue_system_config_update(
+    device_id: str,
+    req: SystemConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
+):
+    """Queue update of SpoolBuddy .env config on the device."""
+    result = await db.execute(select(SpoolBuddyDevice).where(SpoolBuddyDevice.device_id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not registered")
+
+    parsed = urlparse(req.backend_url.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="backend_url must be a full URL with scheme, e.g. http://192.168.1.100:5000 or http://bambuddy.local",
+        )
+
+    payload = {
+        "backend_url": req.backend_url.strip(),
+    }
+    if req.api_key is not None and req.api_key.strip():
+        payload["api_key"] = req.api_key.strip()
+
+    device.pending_system_payload = json.dumps(payload)
+    device.pending_command = "apply_system_config"
+    await db.commit()
+
+    logger.info("Queued system config update for device %s", device_id)
+    return {"status": "queued", "message": "System config update queued"}
+
+
+@router.post("/devices/{device_id}/system/command-result")
+async def system_command_result(
+    device_id: str,
+    req: SystemCommandResultRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
+):
+    """Receive completion status for queued system command from daemon."""
+    result = await db.execute(select(SpoolBuddyDevice).where(SpoolBuddyDevice.device_id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not registered")
+
+    if not device.pending_command:
+        logger.info("System command result from %s with no pending command: %s", device_id, req.command)
+        return {"status": "ok", "message": "No pending command"}
+
+    if req.command != device.pending_command:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Command mismatch: pending '{device.pending_command}', got '{req.command}'",
+        )
+
+    if req.command == "apply_system_config":
+        device.pending_system_payload = None
+    device.pending_command = None
+    await db.commit()
+
+    logger.info(
+        "System command result from %s: %s success=%s message=%s",
+        device_id,
+        req.command,
+        req.success,
+        req.message,
+    )
+    return {"status": "ok"}
+
+
+# --- Diagnostics ---
+
+
+@router.post("/diagnostics/{device_id}/run")
+async def queue_diagnostic(
+    device_id: str,
+    diagnostic: str,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_READ),
+):
+    """Queue a hardware diagnostic to run on the SpoolBuddy device.
+
+    Args:
+        device_id: The device ID
+        diagnostic: 'scale' or 'nfc' to select which diagnostic to run
+
+    Returns:
+        Status message indicating diagnostic was queued
+    """
+    if diagnostic not in ("scale", "nfc", "read_tag"):
+        raise HTTPException(status_code=400, detail="Unknown diagnostic. Must be 'scale', 'nfc', or 'read_tag'")
+
+    result = await db.execute(select(SpoolBuddyDevice).where(SpoolBuddyDevice.device_id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not registered")
+
+    device.pending_command = f"run_{diagnostic}_diag"
+    _diagnostic_results.pop((device_id, diagnostic), None)
+    await db.commit()
+
+    logger.info("Diagnostic queued for device %s: %s", device_id, diagnostic)
+    return {"status": "queued", "diagnostic": diagnostic, "message": f"Diagnostic '{diagnostic}' queued for device"}
+
+
+@router.get("/diagnostics/{device_id}/result")
+async def get_diagnostic_result(
+    device_id: str,
+    diagnostic: str,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_READ),
+):
+    """Get the latest diagnostic result for a device.
+
+    Args:
+        device_id: The device ID
+        diagnostic: 'scale' or 'nfc'
+
+    Returns:
+        Diagnostic result or 404 if not found
+    """
+    if diagnostic not in ("scale", "nfc", "read_tag"):
+        raise HTTPException(status_code=400, detail="Unknown diagnostic. Must be 'scale', 'nfc', or 'read_tag'")
+
+    result = await db.execute(select(SpoolBuddyDevice).where(SpoolBuddyDevice.device_id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not registered")
+
+    diag_result = _diagnostic_results.get((device_id, diagnostic))
+    if not diag_result:
+        raise HTTPException(status_code=404, detail=f"No {diagnostic} diagnostic results available yet")
+    return diag_result
+
+
+@router.post("/diagnostics/{device_id}/result")
+async def report_diagnostic_result(
+    device_id: str,
+    req: DiagnosticResultRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
+):
+    """Report diagnostic result from SpoolBuddy device."""
+    result = await db.execute(select(SpoolBuddyDevice).where(SpoolBuddyDevice.device_id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not registered")
+
+    if req.diagnostic not in ("nfc", "scale", "read_tag"):
+        raise HTTPException(status_code=400, detail="Unknown diagnostic. Must be 'scale', 'nfc', or 'read_tag'")
+
+    _diagnostic_results[(device_id, req.diagnostic)] = {
+        "diagnostic": req.diagnostic,
+        "success": req.success,
+        "output": req.output,
+        "exit_code": req.exit_code,
+    }
+
+    device.pending_command = None
+    await db.commit()
+
+    logger.info("Diagnostic result received for device %s: %s (success=%s)", device_id, req.diagnostic, req.success)
+    return {"status": "ok", "message": "Diagnostic result recorded"}
 
 
 # --- Update check ---
