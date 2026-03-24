@@ -1358,6 +1358,44 @@ class BambuMQTTClient:
                             # When tray_type is explicitly empty, clear everything
                             # including RFID data (tag_uid/tray_uuid).
                             slot_clearing = new_tray.get("tray_type") == ""
+                            # Some printers (e.g. H2D) only send {id, state} in
+                            # incremental updates when a tray is not fully loaded.
+                            # state=11 means loaded; other values (9=empty,
+                            # 10=spool present but filament not in feeder) indicate
+                            # the slot should be cleared.  Without this, old
+                            # tray_type/tray_color persist indefinitely (#784).
+                            tray_state = new_tray.get("state")
+                            if (
+                                tray_state is not None
+                                and tray_state != 11
+                                and "tray_type" not in new_tray
+                                and merged_tray.get("tray_type")
+                            ):
+                                logger.info(
+                                    "[%s] AMS %s tray %s: state=%s (not loaded) — clearing stale tray data",
+                                    self.serial_number,
+                                    ams_id,
+                                    tray_id,
+                                    tray_state,
+                                )
+                                slot_clearing = True
+                                # The incremental update only has {id, state} — inject
+                                # empty values for all content fields so the merge loop
+                                # below clears the stale data from merged_tray.
+                                new_tray.update(
+                                    {
+                                        "tray_type": "",
+                                        "tray_sub_brands": "",
+                                        "tray_color": "",
+                                        "tray_id_name": "",
+                                        "tray_info_idx": "",
+                                        "tag_uid": "0000000000000000",
+                                        "tray_uuid": "00000000000000000000000000000000",
+                                        "remain": 0,
+                                        "k": None,
+                                        "cali_idx": None,
+                                    }
+                                )
                             for key, value in new_tray.items():
                                 # Fields that should always be updated (even with empty/zero values):
                                 # - remain, k, id, cali_idx: status indicators where 0 is valid

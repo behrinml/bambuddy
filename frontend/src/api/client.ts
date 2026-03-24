@@ -129,6 +129,7 @@ export interface AMSTray {
   nozzle_temp_max: number | null;  // Max nozzle temperature
   drying_temp: number | null;      // RFID-recommended drying temp
   drying_time: number | null;      // RFID-recommended drying time (hours)
+  state: number | null;            // AMS tray state: 9=empty, 10=spool present not loaded, 11=loaded
 }
 
 export interface AMSUnit {

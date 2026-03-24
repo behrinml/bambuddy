@@ -428,15 +428,25 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
 
     # Include tray_now and vt_tray hash so external spool changes trigger broadcasts
     vt_tray_key = hash(str(state.raw_data.get("vt_tray", []))) if state.raw_data else 0
-    # Include AMS dry_time values so drying status changes trigger broadcasts
+    # Include AMS dry_time and tray state values so drying/slot changes trigger broadcasts
     ams_dry_key = tuple(a.get("dry_time", 0) for a in (state.raw_data.get("ams") or [])) if state.raw_data else ()
+    # Include tray states so load/unload transitions (state 11→10) trigger broadcasts (#784)
+    ams_tray_key = (
+        tuple(
+            (t.get("id"), t.get("tray_type", ""), t.get("state"))
+            for a in (state.raw_data.get("ams") or [])
+            for t in a.get("tray", [])
+        )
+        if state.raw_data
+        else ()
+    )
     status_key = (
         f"{state.connected}:{state.state}:{state.progress}:{state.layer_num}:"
         f"{nozzle_temp}:{bed_temp}:{nozzle_2_temp}:{chamber_temp}:"
         f"{state.stg_cur}:{bed_target}:{nozzle_target}:"
         f"{state.cooling_fan_speed}:{state.big_fan1_speed}:{state.big_fan2_speed}:"
         f"{state.chamber_light}:{state.active_extruder}:{state.tray_now}:{vt_tray_key}:"
-        f"{ams_dry_key}"
+        f"{ams_dry_key}:{ams_tray_key}"
     )
 
     # MQTT relay - publish status (before dedup check - always publish to MQTT)

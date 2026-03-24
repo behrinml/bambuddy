@@ -612,6 +612,7 @@ def printer_state_to_dict(state: PrinterState, printer_id: int | None = None, mo
                         "nozzle_temp_max": tray.get("nozzle_temp_max"),
                         "drying_temp": tray.get("drying_temp"),
                         "drying_time": tray.get("drying_time"),
+                        "state": tray.get("state"),
                     }
                 )
             # Prefer humidity_raw (actual percentage) over humidity (index 1-5)

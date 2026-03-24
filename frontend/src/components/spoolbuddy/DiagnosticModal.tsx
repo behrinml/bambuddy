@@ -50,7 +50,7 @@ export function DiagnosticModal({ type, deviceId, onClose }: DiagnosticModalProp
         try {
           result = await spoolbuddyApi.getDiagnosticResult(deviceId, type);
           break;
-        } catch (e) {
+        } catch {
           // Not ready yet, continue polling
           retryCount++;
           if (retryCount % 4 === 0) {
@@ -74,7 +74,7 @@ export function DiagnosticModal({ type, deviceId, onClose }: DiagnosticModalProp
     } finally {
       setIsRunning(false);
     }
-  }, [type, deviceId]);
+  }, [type, deviceId, t]);
 
   const title = type === 'scale'
     ? t('spoolbuddy.diagnostic.scaleTitle', 'Scale Diagnostic')
@@ -134,7 +134,7 @@ export function DiagnosticModal({ type, deviceId, onClose }: DiagnosticModalProp
             </div>
           )}
         </div>
-        
+
         {/* Footer */}
         <div className="flex gap-2 p-4 border-t border-zinc-700 bg-zinc-800">
           <button
