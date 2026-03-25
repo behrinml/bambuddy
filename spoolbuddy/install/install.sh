@@ -433,6 +433,35 @@ install_system_packages() {
     run_with_progress "Installing system packages" apt-get install -y $SYSTEM_PACKAGES
 }
 
+install_wifi_safeguard() {
+    # Protect WiFi credentials from being wiped by apt upgrades.
+    # Raspberry Pi OS Bookworm migrated from wpa_supplicant/dhcpcd to
+    # NetworkManager, but certain package upgrades (raspberrypi-sys-mods,
+    # raspi-config, NetworkManager itself) can delete saved connections
+    # from /etc/NetworkManager/system-connections/.  This hook backs them
+    # up before dpkg runs and restores them if they vanish.
+    local hook_file="/etc/apt/apt.conf.d/80-preserve-wifi"
+
+    if [[ -f "$hook_file" ]]; then
+        success "WiFi safeguard already installed"
+        return
+    fi
+
+    # Only install if NetworkManager is the active network manager
+    if ! systemctl is-active --quiet NetworkManager 2>/dev/null; then
+        return
+    fi
+
+    cat > "$hook_file" << 'APTEOF'
+// Preserve NetworkManager WiFi connections across apt upgrades.
+// Installed by SpoolBuddy — prevents headless Pis from losing WiFi.
+DPkg::Pre-Invoke { "if [ -d /etc/NetworkManager/system-connections ] && [ -n \"$(ls -A /etc/NetworkManager/system-connections/ 2>/dev/null)\" ]; then cp -a /etc/NetworkManager/system-connections/ /etc/NetworkManager/system-connections.bak/; fi"; };
+DPkg::Post-Invoke { "if [ -d /etc/NetworkManager/system-connections.bak ] && [ -z \"$(ls -A /etc/NetworkManager/system-connections/ 2>/dev/null)\" ]; then cp -a /etc/NetworkManager/system-connections.bak/* /etc/NetworkManager/system-connections/ && nmcli general reload 2>/dev/null; fi"; };
+APTEOF
+
+    success "WiFi safeguard installed (${hook_file})"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SpoolBuddy Installation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1305,6 +1334,7 @@ main() {
 
     # ── Step 2: System packages ───────────────────────────────────────────
     install_system_packages
+    install_wifi_safeguard
     detect_python || error "Failed to install Python 3.10+"
     echo ""
 
