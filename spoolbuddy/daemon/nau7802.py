@@ -99,6 +99,7 @@ class NAU7802:
         for _ in range(100):
             status = self.read_reg(REG_PU_CTRL)
             if status & PU_PUR:
+                logger.debug("Power-up ready")
                 break
             time.sleep(0.001)
         else:
@@ -108,18 +109,20 @@ class NAU7802:
         revision = self.read_reg(REG_REVISION)
         if (revision & 0x0F) != 0x0F:
             raise RuntimeError(f"Unexpected NAU7802 revision register: 0x{revision:02X}")
-
-        logger.debug("NAU7802 revision=0x%02X", revision)
+        logger.debug("Revision: 0x%02X", revision)
 
         # Internal LDO enable is PU_CTRL.AVDDS (bit 7); set LDO voltage to 3.0V.
         self._set_bit(REG_PU_CTRL, 7, True)  # AVDDS=1 (internal LDO)
         self._set_field(REG_CTRL1, shift=3, width=3, value=0b101)  # VLDO=3.0V
+        logger.debug("LDO: 3.0V (internal)")
 
         # Gain: 128x (bits 2:0 of CTRL1 = 0b111)
         self._set_field(REG_CTRL1, shift=0, width=3, value=0b111)
+        logger.debug("Gain: 128x")
 
         # Sample rate: 10 SPS (CTRL2 bits 6:4 = 0b000)
         self._set_field(REG_CTRL2, shift=4, width=3, value=0b000)
+        logger.debug("Sample rate: 10 SPS")
 
         # Adafruit tuning: disable ADC chopper clock (ADC bits 5:4 = 0b11)
         self._set_field(REG_ADC, shift=4, width=2, value=0b11)
@@ -129,16 +132,16 @@ class NAU7802:
 
         # Start conversion cycle
         self._set_bit(REG_PU_CTRL, 4, True)
+        logger.debug("Conversion started")
 
         # Flush the first reading — the NAU7802 always returns a stale
         # max-scale value (0x7FFFFF) on the first conversion after power-up.
         for _ in range(200):
             if self.data_ready():
                 self.read_raw()  # discard
+                logger.debug("First reading flushed")
                 break
             time.sleep(0.010)
-
-        logger.debug("NAU7802 initialized: LDO=3.0V, gain=128x, rate=10SPS")
 
     def data_ready(self) -> bool:
         return bool(self.read_reg(REG_PU_CTRL) & PU_CR)
