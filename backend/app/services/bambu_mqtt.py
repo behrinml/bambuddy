@@ -2466,6 +2466,8 @@ class BambuMQTTClient:
                 f"prev={self._previous_gcode_state}, was_running={self._was_running}, "
                 f"already_triggered={self._completion_triggered}, has_callback={bool(self.on_print_complete)}"
             )
+            # Mark as triggered so state is clean for the next print cycle
+            self._completion_triggered = True
 
         if should_trigger_completion:
             if self.state.state == "FINISH":
