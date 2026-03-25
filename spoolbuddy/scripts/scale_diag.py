@@ -133,6 +133,15 @@ class NAU7802:
         self._set_bit(REG_PU_CTRL, 4, True)
         print("  Conversion started")
 
+        # Flush the first reading — the NAU7802 always returns a stale
+        # max-scale value (0x7FFFFF) on the first conversion after power-up.
+        for _ in range(200):
+            if self.data_ready():
+                self.read_raw()  # discard
+                print("  First reading flushed")
+                break
+            time.sleep(0.010)
+
     def data_ready(self) -> bool:
         return bool(self.read_reg(REG_PU_CTRL) & PU_CR)
 
