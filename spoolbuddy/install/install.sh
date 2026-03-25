@@ -462,6 +462,10 @@ APTEOF
     success "WiFi safeguard installed (${hook_file})"
 }
 
+upgrade_system_packages() {
+    run_with_progress "Upgrading system packages" apt-get upgrade -y
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SpoolBuddy Installation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1335,6 +1339,7 @@ main() {
     # ── Step 2: System packages ───────────────────────────────────────────
     install_system_packages
     install_wifi_safeguard
+    upgrade_system_packages
     detect_python || error "Failed to install Python 3.10+"
     echo ""
 
