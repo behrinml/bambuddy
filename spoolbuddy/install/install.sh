@@ -478,9 +478,9 @@ HELPEREOF
 
     cat > "$hook_file" << 'APTEOF'
 // Preserve NetworkManager WiFi connections across apt upgrades.
-// Installed by SpoolBuddy — prevents headless Pis from losing WiFi.
-DPkg::Pre-Invoke { "/usr/local/sbin/preserve-wifi backup"; };
-DPkg::Post-Invoke { "/usr/local/sbin/preserve-wifi restore"; };
+// Installed by SpoolBuddy.
+DPkg::Pre-Invoke {"/usr/local/sbin/preserve-wifi backup";};
+DPkg::Post-Invoke {"/usr/local/sbin/preserve-wifi restore";};
 APTEOF
 
     success "WiFi safeguard installed (${hook_file})"
