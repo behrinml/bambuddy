@@ -378,21 +378,26 @@ class PN5180:
 
         Uses NTAG READ command (0x30) which returns 4 pages (16 bytes) at a time.
         """
+        # One-time setup: Crypto1 off, TX CRC on, RX CRC off, IDLE→TRANSCEIVE
+        self.write_reg_and(0x00, 0xFFFFFFBF)  # Crypto1 off
+        self.write_reg_or(0x19, 0x01)  # TX CRC on
+        self.write_reg_and(0x12, 0xFFFFFFFE)  # RX CRC off
+        self.write_reg(0x03, 0xFFFFFFFF)  # Clear IRQs
+
+        sys_cfg = self.read_reg(0x00)
+        self.write_reg(0x00, sys_cfg & 0xFFFFFFF8)  # IDLE
+        time.sleep(0.001)
+        self.write_reg(0x00, (sys_cfg & 0xFFFFFFF8) | 0x03)  # TRANSCEIVE
+        time.sleep(0.002)
+
         result = bytearray()
         pages_read = 0
         while pages_read < num_pages:
-            # CRC and state machine setup per iteration (same as ntag_write_page)
-            self.write_reg_and(0x00, 0xFFFFFFBF)  # Crypto1 off
-            self.write_reg_or(0x19, 0x01)  # TX CRC on
-            self.write_reg_and(0x12, 0xFFFFFFFE)  # RX CRC off
-            self.write_reg(0x03, 0xFFFFFFFF)  # Clear IRQs
-
-            # Reset state machine: IDLE then TRANSCEIVE
-            sys_cfg = self.read_reg(0x00)
-            self.write_reg(0x00, sys_cfg & 0xFFFFFFF8)  # IDLE
-            time.sleep(0.001)
-            self.write_reg(0x00, (sys_cfg & 0xFFFFFFF8) | 0x03)  # TRANSCEIVE
-            time.sleep(0.002)
+            if pages_read > 0:
+                # Subsequent iterations: just clear IRQs and re-enter TRANSCEIVE
+                self.write_reg(0x03, 0xFFFFFFFF)
+                self.set_transceive_mode()
+                time.sleep(0.001)
 
             # READ command: 0x30 + page number -> returns 16 bytes (4 pages)
             self.send_data([0x30, start_page + pages_read])
@@ -410,7 +415,6 @@ class PN5180:
                 return None
 
             data = self.read_data(16)
-            # Copy only the pages we need
             pages_to_copy = min(4, num_pages - pages_read)
             result.extend(data[: pages_to_copy * 4])
             pages_read += 4  # Always advances by 4 (READ returns 4 pages)
