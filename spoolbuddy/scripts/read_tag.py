@@ -372,53 +372,48 @@ class PN5180:
 
         return self.read_data(16)
 
-    def _ntag_setup_and_read_one(self, page: int) -> bytes | None:
-        """Setup registers and read 4 NTAG pages (16 bytes) starting at page."""
-        # Crypto1 off, TX CRC on, RX CRC off
-        self.write_reg_and(0x00, 0xFFFFFFBF)
-        self.write_reg_or(0x19, 0x01)
-        self.write_reg_and(0x12, 0xFFFFFFFE)
-        self.write_reg(0x03, 0xFFFFFFFF)
-
-        # IDLE → TRANSCEIVE
-        sys_cfg = self.read_reg(0x00)
-        self.write_reg(0x00, sys_cfg & 0xFFFFFFF8)
-        time.sleep(0.001)
-        self.write_reg(0x00, (sys_cfg & 0xFFFFFFF8) | 0x03)
-        time.sleep(0.002)
-
-        # READ command: 0x30 + page → returns 16 bytes (4 pages)
-        self.send_data([0x30, page])
-        time.sleep(0.010)
-
-        rx_status = self.read_reg(0x13)
-        rx_len = rx_status & 0x1FF
-        if rx_len < 16:
-            print(f"    NTAG read page {page}: rx_len={rx_len} (expected >=16)")
-            return None
-
-        return self.read_data(16)
-
     def ntag_read_pages(self, start_page: int, num_pages: int) -> bytes | None:
         """Read NTAG pages (4 bytes each). No authentication required.
 
         Uses NTAG READ command (0x30) which returns 4 pages (16 bytes) at a time.
-        The PN5180 drops the NTAG card after each READ, so we reactivate between
-        each 4-page batch.
+        Reads all requested pages in a single activated session — the card must
+        already be selected via activate_type_a() or reactivate_card().
         """
+        # One-time setup: Crypto1 off, TX CRC on, RX CRC off, IDLE→TRANSCEIVE
+        self.write_reg_and(0x00, 0xFFFFFFBF)  # Crypto1 off
+        self.write_reg_or(0x19, 0x01)  # TX CRC on
+        self.write_reg_and(0x12, 0xFFFFFFFE)  # RX CRC off
+        self.write_reg(0x03, 0xFFFFFFFF)  # Clear IRQs
+
+        sys_cfg = self.read_reg(0x00)
+        self.write_reg(0x00, sys_cfg & 0xFFFFFFF8)  # IDLE
+        time.sleep(0.001)
+        self.write_reg(0x00, (sys_cfg & 0xFFFFFFF8) | 0x03)  # TRANSCEIVE
+        time.sleep(0.002)
+
         result = bytearray()
         pages_read = 0
         while pages_read < num_pages:
             if pages_read > 0:
-                # PN5180 loses the card after each READ — must reactivate
-                if self.reactivate_card() is None:
-                    print(f"    Failed to reactivate card before page {start_page + pages_read}")
-                    return None
+                self.write_reg(0x03, 0xFFFFFFFF)  # Clear IRQs
+                # IDLE → TRANSCEIVE to reset state machine
+                sys_cfg = self.read_reg(0x00)
+                self.write_reg(0x00, sys_cfg & 0xFFFFFFF8)
+                time.sleep(0.001)
+                self.write_reg(0x00, (sys_cfg & 0xFFFFFFF8) | 0x03)
+                time.sleep(0.002)
 
-            data = self._ntag_setup_and_read_one(start_page + pages_read)
-            if data is None:
+            # READ command: 0x30 + page → returns 16 bytes (4 pages)
+            self.send_data([0x30, start_page + pages_read])
+            time.sleep(0.010)
+
+            rx_status = self.read_reg(0x13)
+            rx_len = rx_status & 0x1FF
+            if rx_len < 16:
+                print(f"    NTAG read page {start_page + pages_read}: rx_len={rx_len} (expected >=16)")
                 return None
 
+            data = self.read_data(16)
             pages_to_copy = min(4, num_pages - pages_read)
             result.extend(data[: pages_to_copy * 4])
             pages_read += 4
