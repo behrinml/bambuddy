@@ -853,7 +853,7 @@ strip_packages() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Kiosk Setup (labwc + Chromium + Plymouth splash)
+# Kiosk Setup (labwc + Chromium + fbi splash)
 # ─────────────────────────────────────────────────────────────────────────────
 
 setup_kiosk() {
@@ -878,7 +878,7 @@ setup_kiosk() {
     fi
 
     # ── Install kiosk packages ────────────────────────────────────────────
-    run_with_progress "Installing kiosk packages" apt-get install -y labwc chromium fbi wlr-randr
+    run_with_progress "Installing kiosk packages" apt-get install -y labwc chromium fim wlr-randr
 
     # ── config.txt tweaks ─────────────────────────────────────────────────
     local boot_config="/boot/firmware/config.txt"
@@ -946,8 +946,8 @@ setup_kiosk() {
         success "Kernel cmdline updated"
     fi
 
-    # ── fbi boot splash ──────────────────────────────────────────────────
-    info "Installing boot splash (fbi)..."
+    # ── fim boot splash ──────────────────────────────────────────────────
+    info "Installing boot splash (fim)..."
     local splash_dir="/usr/share/spoolbuddy"
     mkdir -p "$splash_dir"
 
@@ -970,7 +970,7 @@ setup_kiosk() {
         apt-get purge -y plymouth plymouth-themes 2>/dev/null || true
     fi
 
-    # Create systemd service that shows splash image on tty1 during boot
+    # Create systemd service that shows splash image via DRM during boot
     cat > /etc/systemd/system/spoolbuddy-splash.service << 'EOF'
 [Unit]
 Description=SpoolBuddy Boot Splash
@@ -981,11 +981,8 @@ Before=getty@tty1.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/fbi -T 1 -a --noverbose --norandom /usr/share/spoolbuddy/splash.png
-ExecStop=/usr/bin/killall -q fbi
-StandardInput=tty
-StandardOutput=tty
-TTYPath=/dev/tty1
+ExecStart=/usr/bin/fim --autozoom --quiet /usr/share/spoolbuddy/splash.png
+ExecStop=/usr/bin/killall -q fim
 
 [Install]
 WantedBy=sysinit.target
@@ -993,7 +990,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable spoolbuddy-splash.service
-    success "Boot splash installed (fbi)"
+    success "Boot splash installed (fim)"
 
     # ── Auto-login on tty1 ────────────────────────────────────────────────
     info "Configuring auto-login for $KIOSK_USER..."
@@ -1099,7 +1096,7 @@ EOF
         # ── labwc autostart ───────────────────────────────────────────────────
         cat > "$labwc_dir/autostart" << EOF
 # Kill fbi boot splash now that the compositor is running
-systemctl stop spoolbuddy-splash.service 2>/dev/null || killall -q fbi || true
+systemctl stop spoolbuddy-splash.service 2>/dev/null || killall -q fim || true
 
 # Force 1024x600 (panel doesn't advertise this natively)
 wlr-randr --output HDMI-A-1 --custom-mode 1024x600@60 &
@@ -1393,7 +1390,7 @@ main() {
     download_spoolbuddy
     echo ""
 
-    # ── Step 3b: Kiosk setup (labwc + Chromium + squeekboard + Plymouth) ──
+    # ── Step 3b: Kiosk setup (labwc + Chromium + fbi splash) ──
     setup_kiosk
     echo ""
 
@@ -1445,7 +1442,7 @@ main() {
 
     if [[ "$INSTALL_MODE" == "full" ]]; then
         echo -e "  ${BOLD}Next steps:${NC}"
-        echo -e "    1. Reboot (required for kiosk, Plymouth splash, and hardware changes)"
+        echo -e "    1. Reboot (required for kiosk, boot splash, and hardware changes)"
         echo -e "    2. The touchscreen kiosk will start automatically after reboot"
         echo -e "    3. On another device, open ${CYAN}http://$ip_addr:$BAMBUDDY_PORT${NC}"
         echo -e "    4. Go to Settings -> API Keys and create an API key"
@@ -1468,7 +1465,7 @@ main() {
     echo -e "  ${BOLD}Diagnostics:${NC}      ${CYAN}sudo $INSTALL_PATH/spoolbuddy/venv/bin/python $INSTALL_PATH/spoolbuddy/pn5180_diag.py${NC}"
     echo ""
 
-    echo -e "  ${YELLOW}A reboot is required to apply all changes (kiosk, Plymouth splash, hardware).${NC}"
+    echo -e "  ${YELLOW}A reboot is required to apply all changes (kiosk, boot splash, hardware).${NC}"
     echo ""
     if prompt_yes_no "Reboot now?" "y"; then
         reboot
