@@ -100,15 +100,17 @@ export function SpoolBuddyLayout() {
     };
   }, [resetActivity]);
 
-  // Auto-navigate to dashboard when a tag is detected on a non-dashboard page
+  // Auto-navigate to dashboard when a NEW tag is detected (transition from no-tag to tag)
   const tagDetected = Boolean(sbState.matchedSpool || sbState.unknownTagUid);
+  const prevTagDetected = useRef(false);
   useEffect(() => {
-    if (tagDetected) {
+    if (tagDetected && !prevTagDetected.current) {
       resetActivity();
       if (location.pathname !== '/spoolbuddy') {
         navigate('/spoolbuddy');
       }
     }
+    prevTagDetected.current = tagDetected;
   }, [tagDetected, location.pathname, navigate, resetActivity]);
 
   // Screen blank timer
