@@ -256,7 +256,7 @@ describe('SpoolBuddySettingsPage', () => {
     fireEvent.click(screen.getByText('System'));
     await waitFor(() => {
       expect(screen.getByText('Disk')).toBeDefined();
-      expect(screen.getByText('8.2 GB')).toBeDefined();
+      expect(screen.getByText('8.2 / 29.7 GB')).toBeDefined();
     });
   });
 

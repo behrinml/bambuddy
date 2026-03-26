@@ -827,12 +827,12 @@ function SystemTab({ device }: { device: SpoolBuddyDevice }) {
   const diskColor = (disk?.percent ?? 0) >= 90 ? 'bg-red-500' : (disk?.percent ?? 0) >= 70 ? 'bg-amber-500' : 'bg-green-500';
 
   return (
-    <div className="space-y-2">
-      {/* CPU + Temp side by side */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-zinc-800 rounded-lg p-3">
-          <h3 className="text-sm font-semibold text-zinc-300 mb-2">CPU</h3>
-          <div className="space-y-1.5 text-xs">
+    <div className="space-y-1.5">
+      {/* CPU + Memory side by side */}
+      <div className="grid grid-cols-2 gap-1.5">
+        <div className="bg-zinc-800 rounded-lg p-2">
+          <h3 className="text-sm font-semibold text-zinc-300 mb-1">CPU</h3>
+          <div className="space-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-zinc-500">{t('spoolbuddy.settings.cores', 'Cores')}</span>
               <span className="text-zinc-300 font-mono">{stats.cpu_count ?? '-'}</span>
@@ -853,14 +853,14 @@ function SystemTab({ device }: { device: SpoolBuddyDevice }) {
         </div>
 
         {/* Memory */}
-        <div className="bg-zinc-800 rounded-lg p-3">
-          <h3 className="text-sm font-semibold text-zinc-300 mb-2">
+        <div className="bg-zinc-800 rounded-lg p-2">
+          <h3 className="text-sm font-semibold text-zinc-300 mb-1">
             {t('spoolbuddy.settings.memory', 'Memory')}
           </h3>
           {mem ? (
-            <div className="space-y-2">
+            <div className="space-y-1">
               <UsageBar percent={mem.percent ?? 0} color={memColor} />
-              <div className="space-y-1 text-xs">
+              <div className="space-y-0.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-zinc-500">{t('spoolbuddy.settings.used', 'Used')}</span>
                   <span className="text-zinc-300 font-mono">{mem.used_mb} / {mem.total_mb} MB</span>
@@ -878,40 +878,29 @@ function SystemTab({ device }: { device: SpoolBuddyDevice }) {
       </div>
 
       {/* Disk */}
-      <div className="bg-zinc-800 rounded-lg p-3">
-        <h3 className="text-sm font-semibold text-zinc-300 mb-2">
-          {t('spoolbuddy.settings.disk', 'Disk')}
-        </h3>
-        {disk ? (
-          <div className="space-y-2">
-            <UsageBar percent={disk.percent ?? 0} color={diskColor} />
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
-                <span className="text-zinc-500 block">{t('spoolbuddy.settings.used', 'Used')}</span>
-                <span className="text-zinc-300 font-mono">{disk.used_gb} GB</span>
-              </div>
-              <div>
-                <span className="text-zinc-500 block">{t('spoolbuddy.settings.available', 'Free')}</span>
-                <span className="text-zinc-300 font-mono">{disk.free_gb} GB</span>
-              </div>
-              <div>
-                <span className="text-zinc-500 block">{t('spoolbuddy.settings.total', 'Total')}</span>
-                <span className="text-zinc-300 font-mono">{disk.total_gb} GB</span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <span className="text-xs text-zinc-500">-</span>
-        )}
+      <div className="bg-zinc-800 rounded-lg p-2">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold text-zinc-300 shrink-0">
+            {t('spoolbuddy.settings.disk', 'Disk')}
+          </h3>
+          {disk ? (
+            <>
+              <div className="flex-1"><UsageBar percent={disk.percent ?? 0} color={diskColor} /></div>
+              <span className="text-xs text-zinc-300 font-mono shrink-0">{disk.used_gb} / {disk.total_gb} GB</span>
+            </>
+          ) : (
+            <span className="text-xs text-zinc-500">-</span>
+          )}
+        </div>
       </div>
 
-      {/* OS Info — two columns */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-zinc-800 rounded-lg p-3">
+      {/* OS + Runtime side by side */}
+      <div className="grid grid-cols-2 gap-1.5">
+        <div className="bg-zinc-800 rounded-lg p-2">
           <h3 className="text-sm font-semibold text-zinc-300 mb-1">
             {t('spoolbuddy.settings.osInfo', 'OS')}
           </h3>
-          <div className="space-y-1 text-xs">
+          <div className="space-y-0.5 text-xs">
             {stats.os?.os && (
               <div className="flex justify-between">
                 <span className="text-zinc-500">{t('spoolbuddy.settings.distro', 'Distro')}</span>
@@ -932,11 +921,11 @@ function SystemTab({ device }: { device: SpoolBuddyDevice }) {
             )}
           </div>
         </div>
-        <div className="bg-zinc-800 rounded-lg p-3">
+        <div className="bg-zinc-800 rounded-lg p-2">
           <h3 className="text-sm font-semibold text-zinc-300 mb-1">
             {t('spoolbuddy.settings.runtime', 'Runtime')}
           </h3>
-          <div className="space-y-1 text-xs">
+          <div className="space-y-0.5 text-xs">
             {stats.os?.python && (
               <div className="flex justify-between">
                 <span className="text-zinc-500">Python</span>
