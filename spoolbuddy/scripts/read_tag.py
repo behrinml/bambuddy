@@ -373,16 +373,18 @@ class PN5180:
         return self.read_data(16)
 
     def _ntag_reactivate(self) -> bool:
-        """RF cycle with extended timing for NTAG re-selection between reads."""
-        self.rf_off()
-        time.sleep(0.050)  # 50ms RF gap — NTAG needs longer than MIFARE Classic
+        """Full hardware reset + RF activation for NTAG re-selection between reads.
 
-        self.write_reg(0x03, 0xFFFFFFFF)  # Clear IRQs
+        The PN5180 enters an unrecoverable state after an NTAG READ command —
+        simple RF off/on cycles cannot re-select the tag. A full GPIO hardware
+        reset is required to clear the internal transceiver state.
+        """
+        self.reset()
         self.load_rf_config(0x00, 0x80)  # ISO 14443A
         time.sleep(0.010)
-
         self.rf_on()
-        time.sleep(0.050)  # Let tag power up fully
+        time.sleep(0.030)
+        self.set_transceive_mode()
 
         return self.activate_type_a() is not None
 
