@@ -614,7 +614,12 @@ def main():
             sys.exit(1)
 
         uid, sak = result
-        tag_types = {0x00: "NTAG", 0x08: "MIFARE Classic 1K", 0x18: "MIFARE Classic 4K"}
+        tag_types = {
+            0x00: "NTAG",
+            0x04: "NTAG (MIFARE Ultralight)",
+            0x08: "MIFARE Classic 1K",
+            0x18: "MIFARE Classic 4K",
+        }
         print(f"    UID : {uid.hex().upper()}")
         print(f"    SAK : 0x{sak:02X} ({tag_types.get(sak, 'Unknown')})")
 
@@ -640,8 +645,8 @@ def main():
                 raw += blocks[block_num]
             print(f"\n    Raw payload ({len(raw)} bytes): {raw.hex().upper()}")
 
-        elif sak == 0x00:
-            # NTAG — SpoolEase / OpenPrintTag
+        elif sak in (0x00, 0x04):
+            # NTAG / MIFARE Ultralight family — SpoolEase / OpenPrintTag
             print("[4] Reading NTAG data (pages 4-20)...")
             ntag_data = nfc.read_ntag(uid)
 
