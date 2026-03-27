@@ -897,11 +897,6 @@ strip_packages() {
         cups-common
         cups-client
         rpcbind
-        upower
-        # Replaced by cog (WPE WebKit) for kiosk
-        chromium
-        chromium-common
-        chromium-sandbox
     )
 
     local to_remove=()
