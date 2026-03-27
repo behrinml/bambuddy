@@ -805,6 +805,29 @@ strip_services() {
         man-db.timer
         e2scrub_all.timer
         e2scrub_reap.service
+        # Audio stack (no speakers on a spool reader)
+        pipewire.service
+        pipewire.socket
+        pipewire-pulse.service
+        pipewire-pulse.socket
+        wireplumber.service
+        # Printing
+        cups.service
+        cups.socket
+        cups-browsed.service
+        # Desktop services
+        accounts-daemon.service
+        upower.service
+        polkit.service
+        # Flatpak portals (not using Flatpak)
+        xdg-desktop-portal.service
+        xdg-desktop-portal-gtk.service
+        xdg-document-portal.service
+        # NFS/RPC (unnecessary + security surface)
+        rpcbind.service
+        rpcbind.socket
+        # Bluetooth media proxy
+        mpris-proxy.service
     )
 
     local disabled=0
@@ -819,6 +842,34 @@ strip_services() {
         success "Disabled $disabled unnecessary services"
     else
         success "No unnecessary services to disable"
+    fi
+
+    # Disable user-level services (audio stack, portals, mpris-proxy)
+    # These run under the kiosk user and aren't caught by system-level disable
+    local kiosk_user="${SUDO_USER:-$(logname 2>/dev/null || echo pi)}"
+    if id "$kiosk_user" &>/dev/null; then
+        local user_services=(
+            pipewire.service
+            pipewire.socket
+            pipewire-pulse.service
+            pipewire-pulse.socket
+            wireplumber.service
+            xdg-desktop-portal.service
+            xdg-desktop-portal-gtk.service
+            xdg-document-portal.service
+            mpris-proxy.service
+        )
+        local user_disabled=0
+        for svc in "${user_services[@]}"; do
+            if su -l "$kiosk_user" -c "systemctl --user is-enabled $svc" &>/dev/null; then
+                su -l "$kiosk_user" -c "systemctl --user disable $svc" 2>/dev/null || true
+                su -l "$kiosk_user" -c "systemctl --user mask $svc" 2>/dev/null || true
+                (( ++user_disabled ))
+            fi
+        done
+        if (( user_disabled > 0 )); then
+            success "Disabled $user_disabled unnecessary user services for $kiosk_user"
+        fi
     fi
 }
 
@@ -835,6 +886,15 @@ strip_packages() {
         avahi-daemon
         modemmanager
         udisks2
+        pipewire
+        pipewire-pulse
+        wireplumber
+        cups
+        cups-browsed
+        cups-common
+        cups-client
+        rpcbind
+        upower
     )
 
     local to_remove=()
@@ -1084,6 +1144,11 @@ exec chromium --kiosk --no-first-run --disable-infobars \
     --noerrdialogs --disable-component-update \
     --overscroll-history-navigation=0 \
     --ozone-platform=wayland \
+    --disable-gpu-rasterization \
+    --disable-smooth-scrolling \
+    --enable-low-end-device-mode \
+    --disable-background-networking \
+    --disable-dev-shm-usage \
     "\$kiosk_url"
 EOF
 
