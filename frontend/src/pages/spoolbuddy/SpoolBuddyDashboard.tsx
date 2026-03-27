@@ -9,12 +9,6 @@ import { SpoolInfoCard, UnknownTagCard } from '../../components/spoolbuddy/Spool
 import { AssignToAmsModal } from '../../components/spoolbuddy/AssignToAmsModal';
 import { LinkSpoolModal } from '../../components/spoolbuddy/LinkSpoolModal';
 
-// Color palette for the cycling spool animation
-const SPOOL_COLORS = [
-  '#00AE42', '#FF6B35', '#3B82F6', '#EF4444', '#A855F7',
-  '#FBBF24', '#14B8A6', '#EC4899', '#F97316', '#22C55E',
-];
-
 function normalizeHexTag(value: string | null | undefined): string {
   if (!value) return '';
   return value.replace(/[^0-9a-f]/gi, '').toUpperCase();
@@ -29,15 +23,21 @@ function tagsEquivalent(a: string | null | undefined, b: string | null | undefin
   return aNorm.endsWith(bNorm) || bNorm.endsWith(aNorm);
 }
 
-// --- Idle state with color-cycling spool and NFC waves ---
-function ColorCyclingSpool() {
+// Color palette for the cycling spool animation
+const SPOOL_COLORS = [
+  '#00AE42', '#FF6B35', '#3B82F6', '#EF4444', '#A855F7',
+  '#FBBF24', '#14B8A6', '#EC4899', '#F97316', '#22C55E',
+];
+
+// --- Idle state with slow color-cycling spool ---
+function IdleSpool() {
   const { t } = useTranslation();
   const [colorIndex, setColorIndex] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setColorIndex((prev) => (prev + 1) % SPOOL_COLORS.length);
-    }, 2000);
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -45,22 +45,16 @@ function ColorCyclingSpool() {
 
   return (
     <div className="flex flex-col items-center text-center">
-      {/* Animated spool with NFC waves */}
+      {/* Spool with single subtle NFC ring */}
       <div className="relative mb-6 flex items-center justify-center" style={{ width: 160, height: 160 }}>
-        {/* NFC wave rings */}
-        <div className="absolute w-24 h-24 rounded-full border-2 border-green-500/30 animate-ping" style={{ animationDuration: '2.5s' }} />
-        <div className="absolute w-32 h-32 rounded-full border border-green-500/20 animate-ping" style={{ animationDuration: '2.5s', animationDelay: '0.4s' }} />
-        <div className="absolute w-40 h-40 rounded-full border border-green-500/10 animate-ping" style={{ animationDuration: '2.5s', animationDelay: '0.8s' }} />
+        {/* Static NFC wave rings */}
+        <div className="absolute w-24 h-24 rounded-full border-2 border-green-500/30" />
+        <div className="absolute w-32 h-32 rounded-full border border-green-500/20" />
+        <div className="absolute w-40 h-40 rounded-full border border-green-500/10" />
 
-        {/* Spool icon with color transition and glow */}
-        <div className="relative">
-          <div
-            className="absolute -inset-4 rounded-full blur-2xl opacity-30 transition-colors duration-1000"
-            style={{ backgroundColor: currentColor }}
-          />
-          <div className="transition-all duration-1000">
-            <SpoolIcon color={currentColor} isEmpty={false} size={100} />
-          </div>
+        {/* Spool icon with slow color transition */}
+        <div className="relative transition-colors duration-[2000ms]">
+          <SpoolIcon color={currentColor} isEmpty={false} size={100} />
         </div>
       </div>
 
@@ -314,7 +308,7 @@ export function SpoolBuddyDashboard() {
             <div className="space-y-2.5">
               {/* Connection status */}
               <div className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full ${sbState.deviceOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                <div className={`w-2.5 h-2.5 rounded-full ${sbState.deviceOnline ? 'bg-green-500' : 'bg-red-500'}`} />
                 <span className="text-base text-zinc-400">
                   {sbState.deviceOnline ? t('spoolbuddy.status.online', 'Online') : t('spoolbuddy.status.offline', 'Disconnected')}
                 </span>
@@ -410,7 +404,7 @@ export function SpoolBuddyDashboard() {
                   onClose={handleCloseSpoolCard}
                 />
               ) : (
-                <ColorCyclingSpool />
+                <IdleSpool />
               )}
             </div>
           </div>

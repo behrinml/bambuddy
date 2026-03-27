@@ -846,33 +846,31 @@ strip_services() {
         success "No unnecessary services to disable"
     fi
 
-    # Disable user-level services (audio stack, portals, mpris-proxy)
-    # These run under the kiosk user and aren't caught by system-level disable
-    local kiosk_user="${SUDO_USER:-$(logname 2>/dev/null || echo pi)}"
-    if id "$kiosk_user" &>/dev/null; then
-        local user_services=(
-            pipewire.service
-            pipewire.socket
-            pipewire-pulse.service
-            pipewire-pulse.socket
-            wireplumber.service
-            xdg-desktop-portal.service
-            xdg-desktop-portal-gtk.service
-            xdg-document-portal.service
-            xdg-permission-store.service
-            mpris-proxy.service
-        )
-        local user_disabled=0
-        for svc in "${user_services[@]}"; do
-            if su -l "$kiosk_user" -c "systemctl --user is-enabled $svc" &>/dev/null; then
-                su -l "$kiosk_user" -c "systemctl --user disable $svc" 2>/dev/null || true
-                su -l "$kiosk_user" -c "systemctl --user mask $svc" 2>/dev/null || true
-                (( ++user_disabled ))
-            fi
-        done
-        if (( user_disabled > 0 )); then
-            success "Disabled $user_disabled unnecessary user services for $kiosk_user"
+    # Mask user-level services globally via /etc/systemd/user/ overrides.
+    # The su-based approach doesn't reliably reach the user's systemd instance
+    # when run from sudo, so we create global masks that apply before login.
+    local user_services=(
+        pipewire.service
+        pipewire.socket
+        pipewire-pulse.service
+        pipewire-pulse.socket
+        wireplumber.service
+        xdg-desktop-portal.service
+        xdg-desktop-portal-gtk.service
+        xdg-document-portal.service
+        xdg-permission-store.service
+        mpris-proxy.service
+    )
+    mkdir -p /etc/systemd/user
+    local user_masked=0
+    for svc in "${user_services[@]}"; do
+        if [[ ! -L "/etc/systemd/user/$svc" ]] || [[ "$(readlink /etc/systemd/user/$svc)" != "/dev/null" ]]; then
+            ln -sf /dev/null "/etc/systemd/user/$svc"
+            (( ++user_masked ))
         fi
+    done
+    if (( user_masked > 0 )); then
+        success "Masked $user_masked unnecessary user services globally"
     fi
 }
 
@@ -1167,6 +1165,7 @@ exec chromium --kiosk --no-first-run --disable-infobars \
     --noerrdialogs --disable-component-update \
     --overscroll-history-navigation=0 \
     --ozone-platform=wayland \
+    --disable-crash-reporter --disable-breakpad \
     "\$kiosk_url"
 EOF
 
