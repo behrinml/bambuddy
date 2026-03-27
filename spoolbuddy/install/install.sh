@@ -823,6 +823,7 @@ strip_services() {
         xdg-desktop-portal.service
         xdg-desktop-portal-gtk.service
         xdg-document-portal.service
+        xdg-permission-store.service
         # NFS/RPC (unnecessary + security surface)
         rpcbind.service
         rpcbind.socket
@@ -834,6 +835,7 @@ strip_services() {
     for svc in "${services[@]}"; do
         if systemctl is-enabled "$svc" &>/dev/null; then
             systemctl disable "$svc" 2>/dev/null || true
+            systemctl mask "$svc" 2>/dev/null || true
             (( ++disabled ))
         fi
     done
@@ -857,6 +859,7 @@ strip_services() {
             xdg-desktop-portal.service
             xdg-desktop-portal-gtk.service
             xdg-document-portal.service
+            xdg-permission-store.service
             mpris-proxy.service
         )
         local user_disabled=0
@@ -1123,7 +1126,12 @@ CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-background-networking"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-dev-shm-usage"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-pings"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-default-browser-check"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --show-component-extension-options"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-extensions"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-background-timer-throttling"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --memory-pressure-off"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-renderer-backgrounding"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-crash-reporter"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --js-flags=--max-old-space-size=128"
 CHROMIUM_EOF
         success "Chromium kiosk performance flags installed"
 
