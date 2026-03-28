@@ -4,6 +4,11 @@ All notable changes to Bambuddy will be documented in this file.
 
 ## [0.2.3b1] - Unreleased
 
+### Fixed
+- **H2D External Spool Uses Wrong Nozzle** ([#836](https://github.com/maziggy/bambuddy/issues/836)) — Prints sent from Bambuddy to dual-nozzle printers (H2D, H2D Pro) with external spools always routed to the wrong nozzle. The old `ams_mapping2` format used a shared `ams_id: 255` with `slot_id: 0/1` to differentiate external slots, but the firmware interpreted slot_id as the nozzle index (0=main/right, 1=deputy/left), routing filament to the opposite nozzle. Already fixed by the #797 `ams_mapping2` format change (per-tray `ams_id` instead of shared unit), but users on older builds still experience this. Printing the same file directly from the slicer worked correctly. Reported by @NoahTingey.
+
+## [0.2.2.2] - 2026-03-27
+
 ### New Features
 - **Persistent Auto-Off for Smart Plugs** ([#826](https://github.com/maziggy/bambuddy/issues/826)) — Smart plugs now have a "Keep Enabled" toggle under Auto Off settings. When enabled, auto-off stays active between prints instead of requiring manual re-enablement after each print (one-shot). Useful for accessories like BentoBox filters on Home Assistant switches that should always power off when a print completes. Default behavior (one-shot) is unchanged. Requested by @AeroMaestro.
 - **Missing Spool Assignment Notification** ([#763](https://github.com/maziggy/bambuddy/issues/763)) — When a print starts and the AMS mapping references tray slots without assigned spools, Bambuddy now shows a warning toast in the frontend and can send push notifications via any configured notification provider. The notification includes the printer name, missing slot labels (e.g. A2, Ext-L), and expected material profile. A new "Missing Spool Assignment" toggle is available under Print Events in notification provider settings (off by default). Fully integrated with i18n (all 7 locales). Contributed by @Keybored02.

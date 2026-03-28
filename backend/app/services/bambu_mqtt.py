@@ -2727,8 +2727,8 @@ class BambuMQTTClient:
                     elif tray_id >= 254:
                         # External/virtual spool: each virtual tray is its own AMS unit
                         # with a single slot (slot 0). BambuStudio convention:
-                        #   255 = VIRTUAL_TRAY_MAIN_ID (main/left nozzle)
-                        #   254 = VIRTUAL_TRAY_DEPUTY_ID (deputy/right nozzle)
+                        #   255 = VIRTUAL_TRAY_MAIN_ID (main/right nozzle)
+                        #   254 = VIRTUAL_TRAY_DEPUTY_ID (deputy/left nozzle)
                         # Flat mapping must use -1 (firmware doesn't accept raw 254/255).
                         flat_ams_mapping.append(-1)
                         ams_mapping2.append({"ams_id": tray_id, "slot_id": 0})
