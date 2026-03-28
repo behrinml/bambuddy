@@ -4,6 +4,7 @@ import { useQuery, useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { SpoolBuddyOutletContext } from '../../components/spoolbuddy/SpoolBuddyLayout';
 import { api, type InventorySpool, type Printer, type PrinterStatus } from '../../api/client';
+import { useToast } from '../../contexts/ToastContext';
 import { SpoolIcon } from '../../components/spoolbuddy/SpoolIcon';
 import { SpoolInfoCard, UnknownTagCard } from '../../components/spoolbuddy/SpoolInfoCard';
 import { AssignToAmsModal } from '../../components/spoolbuddy/AssignToAmsModal';
@@ -117,6 +118,7 @@ function DeviceOfflineState() {
 export function SpoolBuddyDashboard() {
   const { sbState, selectedPrinterId } = useOutletContext<SpoolBuddyOutletContext>();
   const { t } = useTranslation();
+  const { showToast } = useToast();
 
   // Fetch spools for stats, tag lookup, and untagged list
   const { data: spools = [], refetch: refetchSpools } = useQuery({
@@ -253,15 +255,17 @@ export function SpoolBuddyDashboard() {
         data_origin: 'spoolbuddy',
         tag_type: 'generic',
         cost_per_kg: null,
-        last_scale_weight: weight,
+        last_scale_weight: weight !== null ? Math.round(weight) : null,
         last_weighed_at: weight !== null ? new Date().toISOString() : null,
       });
-      setShowQuickAddModal(false);
-      refetchSpools();
     } catch (e) {
-      console.error('Failed to quick-add spool:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('Failed to quick-add spool:', msg);
+      showToast(msg || t('spoolbuddy.errors.quickAddFailed', 'Failed to add spool'), 'error');
     } finally {
+      setShowQuickAddModal(false);
       setQuickAddBusy(false);
+      refetchSpools();
     }
   };
 
@@ -378,18 +382,21 @@ export function SpoolBuddyDashboard() {
                 <DeviceOfflineState />
               ) : (displayedSpool || sbState.matchedSpool) && displayedTagId && hiddenTagId !== displayedTagId ? (
                 <SpoolInfoCard
-                  spool={{
-                    id: displayedSpool?.id ?? sbState.matchedSpool!.id,
-                    tag_uid: displayedTagId,
-                    material: displayedSpool?.material ?? sbState.matchedSpool!.material,
-                    subtype: displayedSpool?.subtype ?? sbState.matchedSpool!.subtype,
-                    color_name: displayedSpool?.color_name ?? sbState.matchedSpool!.color_name,
-                    rgba: displayedSpool?.rgba ?? sbState.matchedSpool!.rgba,
-                    brand: displayedSpool?.brand ?? sbState.matchedSpool!.brand,
-                    label_weight: displayedSpool?.label_weight ?? sbState.matchedSpool!.label_weight,
-                    core_weight: displayedSpool?.core_weight ?? sbState.matchedSpool!.core_weight,
-                    weight_used: displayedSpool?.weight_used ?? sbState.matchedSpool!.weight_used,
-                  }}
+                  spool={(() => {
+                    const s = displayedSpool ?? sbState.matchedSpool!;
+                    return {
+                      id: s.id,
+                      tag_uid: displayedTagId,
+                      material: s.material,
+                      subtype: s.subtype,
+                      color_name: s.color_name,
+                      rgba: s.rgba,
+                      brand: s.brand,
+                      label_weight: s.label_weight,
+                      core_weight: s.core_weight,
+                      weight_used: s.weight_used,
+                    };
+                  })()}
                   scaleWeight={liveWeight ?? displayedWeight}
                   onSyncWeight={() => refetchSpools()}
                   onAssignToAms={() => setShowAssignAmsModal(true)}

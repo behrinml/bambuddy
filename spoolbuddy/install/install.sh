@@ -1079,6 +1079,11 @@ EOF
 <?xml version="1.0"?>
 <labwc_config>
 
+  <!-- Disable screen blanking — kiosk must stay on -->
+  <core>
+    <screenBlankTimeout>0</screenBlankTimeout>
+  </core>
+
   <theme>
     <name></name>
     <cornerRadius>0</cornerRadius>
@@ -1109,22 +1114,13 @@ EOF
 
         # ── Override Debian/RPi Chromium defaults for kiosk performance ──────
         cat > /etc/chromium.d/spoolbuddy-kiosk << 'CHROMIUM_EOF'
-# SpoolBuddy kiosk: override system defaults for low-end Pi hardware.
-# Replaces CHROMIUM_FLAGS entirely — system defaults (gpu-rasterization,
-# remote-extensions, pings, media-router) are not needed in kiosk mode.
-CHROMIUM_FLAGS="--disable-gpu-rasterization"
+# SpoolBuddy kiosk: add kiosk-specific flags on top of Pi defaults.
+# Preserves Pi GPU settings (gpu-rasterization, ANGLE/GLES) for stability.
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-smooth-scrolling"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-low-end-device-mode"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-background-networking"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-dev-shm-usage"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-pings"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-default-browser-check"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-extensions"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-background-timer-throttling"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --memory-pressure-off"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-renderer-backgrounding"
 CHROMIUM_FLAGS="$CHROMIUM_FLAGS --disable-crash-reporter"
-CHROMIUM_FLAGS="$CHROMIUM_FLAGS --js-flags=--max-old-space-size=128"
 CHROMIUM_EOF
         success "Chromium kiosk performance flags installed"
 
@@ -1181,6 +1177,9 @@ EOF
         cat > "$labwc_dir/autostart" << EOF
 # Force 1024x600 (panel doesn't advertise this natively)
 wlr-randr --output HDMI-A-1 --custom-mode 1024x600@60 &
+
+# Prevent display blanking (labwc 0.9.x has no config option for this)
+(while true; do sleep 60; wlr-randr --output HDMI-A-1 --on 2>/dev/null; done) &
 
 # Launch Chromium via helper that resolves URL from spoolbuddy/.env
 $kiosk_launcher &
