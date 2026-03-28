@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -34,7 +34,7 @@ import { useTheme, type ThemeStyle, type DarkBackground, type LightBackground, t
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Palette } from 'lucide-react';
 
-const validTabs = ['general', 'network', 'plugs', 'notifications', 'filament', 'apikeys', 'virtual-printer', 'users', 'backup'] as const;
+const validTabs = ['general', 'plugs', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'users', 'backup'] as const;
 type TabType = typeof validTabs[number];
 type UsersSubTab = 'users' | 'email';
 
@@ -770,7 +770,9 @@ export function SettingsPage() {
       (settings.preferred_slicer ?? 'bambu_studio') !== (localSettings.preferred_slicer ?? 'bambu_studio') ||
       settings.prometheus_enabled !== localSettings.prometheus_enabled ||
       settings.prometheus_token !== localSettings.prometheus_token ||
-      (settings.user_notifications_enabled ?? true) !== (localSettings.user_notifications_enabled ?? true);
+      (settings.user_notifications_enabled ?? true) !== (localSettings.user_notifications_enabled ?? true) ||
+      (settings.stagger_group_size ?? 2) !== (localSettings.stagger_group_size ?? 2) ||
+      (settings.stagger_interval_minutes ?? 5) !== (localSettings.stagger_interval_minutes ?? 5);
 
     if (!hasChanges) {
       return;
@@ -843,6 +845,8 @@ export function SettingsPage() {
         prometheus_enabled: localSettings.prometheus_enabled,
         prometheus_token: localSettings.prometheus_token,
         user_notifications_enabled: localSettings.user_notifications_enabled,
+        stagger_group_size: localSettings.stagger_group_size,
+        stagger_interval_minutes: localSettings.stagger_interval_minutes,
       };
       updateMutation.mutate(settingsToSave);
     }, 500);
@@ -988,6 +992,17 @@ export function SettingsPage() {
               {notificationProviders.length}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => handleTabChange('queue')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+            activeTab === 'queue'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-gray-900 dark:hover:text-white border-transparent'
+          }`}
+        >
+          <ListOrdered className="w-4 h-4" />
+          {t('settings.tabs.queue', 'Queue')}
         </button>
         <button
           onClick={() => handleTabChange('filament')}
@@ -3319,6 +3334,220 @@ export function SettingsPage() {
       )}
 
       {/* Filament Tab */}
+      {/* Queue Tab */}
+      {activeTab === 'queue' && localSettings && (
+        <div className="max-w-2xl space-y-6">
+          {/* Staggered Batch Start */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-bambu-green" />
+                {t('settings.staggeredStart', 'Staggered Start')}
+              </h3>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-bambu-gray">
+                {t('settings.staggeredStartDescription', 'Default group size and interval when staggering multi-printer batch starts. Can be overridden per batch in the print modal.')}
+              </p>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">
+                    {t('settings.staggerGroupSize', 'Group size')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={localSettings.stagger_group_size ?? 2}
+                    onChange={(e) => updateSetting('stagger_group_size', Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  />
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.staggerGroupSizeHelp', 'Printers to start simultaneously per group')}
+                  </p>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">
+                    {t('settings.staggerInterval', 'Interval (minutes)')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={localSettings.stagger_interval_minutes ?? 5}
+                    onChange={(e) => updateSetting('stagger_interval_minutes', Math.max(1, Math.min(60, parseInt(e.target.value) || 1)))}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  />
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.staggerIntervalHelp', 'Delay between each group starting')}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Auto-Drying */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Flame className="w-4 h-4 text-amber-400" />
+                {t('settings.queueDrying')}
+              </h3>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-bambu-gray">
+                {t('settings.queueDryingDescription')}
+              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-sm text-white">
+                    {t('settings.queueDryingEnabled')}
+                  </label>
+                  <p className="text-xs text-bambu-gray mt-0.5">
+                    {t('settings.queueDryingEnabledDescription')}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.queue_drying_enabled ?? false}
+                    onChange={(e) => updateSetting('queue_drying_enabled', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
+              </div>
+              {localSettings.queue_drying_enabled && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-sm text-white">
+                      {t('settings.queueDryingBlock')}
+                    </label>
+                    <p className="text-xs text-bambu-gray mt-0.5">
+                      {t('settings.queueDryingBlockDescription')}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.queue_drying_block ?? false}
+                      onChange={(e) => updateSetting('queue_drying_block', e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-sm text-white">
+                    {t('settings.ambientDryingEnabled')}
+                  </label>
+                  <p className="text-xs text-bambu-gray mt-0.5">
+                    {t('settings.ambientDryingEnabledDescription')}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.ambient_drying_enabled ?? false}
+                    onChange={(e) => updateSetting('ambient_drying_enabled', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
+              </div>
+              {/* Drying Presets Table */}
+              <div className="space-y-2">
+                <p className="text-sm text-white font-medium">{t('settings.dryingPresets')}</p>
+                <p className="text-xs text-bambu-gray">{t('settings.dryingPresetsDescription')}</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-bambu-gray border-b border-bambu-dark-tertiary">
+                        <th className="text-left py-1.5">{t('settings.dryingFilament')}</th>
+                        <th className="text-center py-1.5" colSpan={2}>AMS 2 Pro</th>
+                        <th className="text-center py-1.5" colSpan={2}>AMS-HT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const defaults: Record<string, { n3f: number; n3s: number; n3f_hours: number; n3s_hours: number }> = {
+                          PLA: { n3f: 45, n3s: 45, n3f_hours: 12, n3s_hours: 12 },
+                          PETG: { n3f: 65, n3s: 65, n3f_hours: 12, n3s_hours: 12 },
+                          TPU: { n3f: 65, n3s: 75, n3f_hours: 12, n3s_hours: 18 },
+                          ABS: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
+                          ASA: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
+                          PA: { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 12 },
+                          PC: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
+                          PVA: { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 18 },
+                        };
+                        let presets = { ...defaults };
+                        try {
+                          if (localSettings.drying_presets) {
+                            const parsed = JSON.parse(localSettings.drying_presets);
+                            if (typeof parsed === 'object' && parsed !== null) {
+                              presets = { ...defaults, ...parsed };
+                            }
+                          }
+                        } catch { /* use defaults */ }
+
+                        const updatePreset = (fil: string, key: string, value: number) => {
+                          const updated = { ...presets, [fil]: { ...presets[fil], [key]: value } };
+                          updateSetting('drying_presets', JSON.stringify(updated));
+                        };
+
+                        return Object.entries(presets).map(([fil, preset]) => (
+                          <tr key={fil} className="border-b border-bambu-dark-tertiary/50">
+                            <td className="py-1.5 pr-2 text-white font-medium">{fil}</td>
+                            <td className="py-1 px-1">
+                              <div className="flex items-center justify-end gap-1">
+                                <input type="number" min={30} max={65} value={preset.n3f}
+                                  onChange={e => updatePreset(fil, 'n3f', Math.max(1, parseInt(e.target.value) || 0))}
+                                  className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <span className="text-bambu-gray">°C</span>
+                              </div>
+                            </td>
+                            <td className="py-1 px-1">
+                              <div className="flex items-center gap-1">
+                                <input type="number" min={1} max={24} value={preset.n3f_hours}
+                                  onChange={e => updatePreset(fil, 'n3f_hours', Math.max(1, parseInt(e.target.value) || 0))}
+                                  className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <span className="text-bambu-gray">h</span>
+                              </div>
+                            </td>
+                            <td className="py-1 px-1">
+                              <div className="flex items-center justify-end gap-1">
+                                <input type="number" min={30} max={85} value={preset.n3s}
+                                  onChange={e => updatePreset(fil, 'n3s', Math.max(1, parseInt(e.target.value) || 0))}
+                                  className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <span className="text-bambu-gray">°C</span>
+                              </div>
+                            </td>
+                            <td className="py-1 px-1">
+                              <div className="flex items-center gap-1">
+                                <input type="number" min={1} max={24} value={preset.n3s_hours}
+                                  onChange={e => updatePreset(fil, 'n3s_hours', Math.max(1, parseInt(e.target.value) || 0))}
+                                  className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <span className="text-bambu-gray">h</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {activeTab === 'filament' && localSettings && (
         <>
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
@@ -3480,180 +3709,6 @@ export function SettingsPage() {
                   <p className="text-xs text-bambu-gray">
                     {t('settings.historyRetentionDescription')}
                   </p>
-                </div>
-
-                {/* Queue Auto-Drying */}
-                <div className="space-y-3 pt-4 border-t border-bambu-dark-tertiary">
-                  <div className="flex items-center gap-2 text-white">
-                    <Flame className="w-4 h-4 text-amber-400" />
-                    <span className="font-medium">{t('settings.queueDrying')}</span>
-                  </div>
-                  <p className="text-xs text-bambu-gray">
-                    {t('settings.queueDryingDescription')}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-sm text-white">
-                        {t('settings.queueDryingEnabled')}
-                      </label>
-                      <p className="text-xs text-bambu-gray mt-0.5">
-                        {t('settings.queueDryingEnabledDescription')}
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={localSettings.queue_drying_enabled ?? false}
-                        onChange={(e) => updateSetting('queue_drying_enabled', e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
-                    </label>
-                  </div>
-                  {localSettings.queue_drying_enabled && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="block text-sm text-white">
-                            {t('settings.queueDryingBlock')}
-                          </label>
-                          <p className="text-xs text-bambu-gray mt-0.5">
-                            {t('settings.queueDryingBlockDescription')}
-                          </p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={localSettings.queue_drying_block ?? false}
-                            onChange={(e) => updateSetting('queue_drying_block', e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-                        </label>
-                      </div>
-                    </>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-sm text-white">
-                        {t('settings.ambientDryingEnabled')}
-                      </label>
-                      <p className="text-xs text-bambu-gray mt-0.5">
-                        {t('settings.ambientDryingEnabledDescription')}
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={localSettings.ambient_drying_enabled ?? false}
-                        onChange={(e) => updateSetting('ambient_drying_enabled', e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
-                    </label>
-                  </div>
-                  {/* Drying Presets Table — always visible since manual drying also uses these */}
-                  <div className="space-y-2">
-                    <p className="text-sm text-white font-medium">{t('settings.dryingPresets')}</p>
-                    <p className="text-xs text-bambu-gray">{t('settings.dryingPresetsDescription')}</p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-bambu-gray border-b border-bambu-dark-tertiary">
-                            <th className="text-left py-1.5">{t('settings.dryingFilament')}</th>
-                            <th className="text-center py-1.5" colSpan={2}>AMS 2 Pro</th>
-                            <th className="text-center py-1.5" colSpan={2}>AMS-HT</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(() => {
-                            const defaults: Record<string, { n3f: number; n3s: number; n3f_hours: number; n3s_hours: number }> = {
-                              PLA: { n3f: 45, n3s: 45, n3f_hours: 12, n3s_hours: 12 },
-                              PETG: { n3f: 65, n3s: 65, n3f_hours: 12, n3s_hours: 12 },
-                              TPU: { n3f: 65, n3s: 75, n3f_hours: 12, n3s_hours: 18 },
-                              ABS: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-                              ASA: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-                              PA: { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 12 },
-                              PC: { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-                              PVA: { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 18 },
-                            };
-                            let presets = { ...defaults };
-                            try {
-                              if (localSettings.drying_presets) {
-                                const parsed = JSON.parse(localSettings.drying_presets);
-                                if (typeof parsed === 'object' && parsed !== null) {
-                                  presets = { ...defaults, ...parsed };
-                                }
-                              }
-                            } catch { /* use defaults */ }
-
-                            const updatePreset = (fil: string, key: string, value: number) => {
-                              const updated = { ...presets, [fil]: { ...presets[fil], [key]: value } };
-                              updateSetting('drying_presets', JSON.stringify(updated));
-                            };
-
-                            return Object.entries(presets).map(([fil, preset]) => (
-                              <tr key={fil} className="border-b border-bambu-dark-tertiary/50">
-                                <td className="py-1.5 pr-2 text-white font-medium">{fil}</td>
-                                <td className="py-1 px-1">
-                                  <div className="flex items-center justify-end gap-1">
-                                    <input
-                                      type="number"
-                                      min={30}
-                                      max={65}
-                                      value={preset.n3f}
-                                      onChange={e => updatePreset(fil, 'n3f', Math.max(1, parseInt(e.target.value) || 0))}
-                                      className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    />
-                                    <span className="text-bambu-gray">°C</span>
-                                  </div>
-                                </td>
-                                <td className="py-1 px-1">
-                                  <div className="flex items-center gap-1">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      max={24}
-                                      value={preset.n3f_hours}
-                                      onChange={e => updatePreset(fil, 'n3f_hours', Math.max(1, parseInt(e.target.value) || 0))}
-                                      className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    />
-                                    <span className="text-bambu-gray">h</span>
-                                  </div>
-                                </td>
-                                <td className="py-1 px-1">
-                                  <div className="flex items-center justify-end gap-1">
-                                    <input
-                                      type="number"
-                                      min={30}
-                                      max={85}
-                                      value={preset.n3s}
-                                      onChange={e => updatePreset(fil, 'n3s', Math.max(1, parseInt(e.target.value) || 0))}
-                                      className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    />
-                                    <span className="text-bambu-gray">°C</span>
-                                  </div>
-                                </td>
-                                <td className="py-1 px-1">
-                                  <div className="flex items-center gap-1">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      max={24}
-                                      value={preset.n3s_hours}
-                                      onChange={e => updatePreset(fil, 'n3s_hours', Math.max(1, parseInt(e.target.value) || 0))}
-                                      className="w-14 px-1.5 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-center text-xs focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    />
-                                    <span className="text-bambu-gray">h</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            ));
-                          })()}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Per-Printer Mapping Default */}

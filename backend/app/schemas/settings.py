@@ -186,6 +186,14 @@ class AppSettings(BaseModel):
         description="Enable user email notifications for print job events (requires Advanced Authentication)",
     )
 
+    # Staggered batch start for multi-printer jobs
+    stagger_group_size: int = Field(
+        default=2, ge=1, le=50, description="Number of printers to start simultaneously in staggered mode"
+    )
+    stagger_interval_minutes: int = Field(
+        default=5, ge=1, le=60, description="Minutes between staggered printer groups"
+    )
+
     # Default sidebar order (admin-set for all users)
     default_sidebar_order: str = Field(
         default="",
@@ -260,6 +268,8 @@ class AppSettingsUpdate(BaseModel):
     prometheus_token: str | None = None
     low_stock_threshold: float | None = Field(default=None, ge=0.1, le=99.9)
     user_notifications_enabled: bool | None = None
+    stagger_group_size: int | None = Field(default=None, ge=1, le=50)
+    stagger_interval_minutes: int | None = Field(default=None, ge=1, le=60)
     default_sidebar_order: str | None = None
 
     @field_validator("default_sidebar_order")

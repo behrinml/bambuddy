@@ -713,6 +713,133 @@ describe('PrintModal', () => {
     });
   });
 
+  describe('stagger start', () => {
+    it('does not show stagger option with single printer in queue mode', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
+      });
+
+      // Select single printer
+      await user.click(screen.getByText('X1 Carbon'));
+
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+    });
+
+    it('shows stagger option when multiple printers selected in queue mode', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Select all')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Select all'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show stagger option in reprint mode', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="reprint"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Select all')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Select all'));
+
+      await waitFor(() => {
+        expect(screen.getByText(/2 printers selected|3 printers selected/)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+    });
+
+    it('shows stagger inputs when stagger checkbox is enabled', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Select all')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Select all'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('Stagger printer starts'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Group size')).toBeInTheDocument();
+        expect(screen.getByText('Interval (min)')).toBeInTheDocument();
+      });
+    });
+
+    it('shows stagger preview with printer count', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Select all')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Select all'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('Stagger printer starts'));
+
+      await waitFor(() => {
+        // Default: 3 printers, group size 2 = 2 groups — preview text includes printer count
+        expect(screen.getByText(/3 printers.*2 groups/)).toBeInTheDocument();
+      });
+    });
+  });
+
   describe('multi-plate selection', () => {
     const multiPlateResponse = {
       is_multi_plate: true,

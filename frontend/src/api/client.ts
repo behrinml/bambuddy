@@ -886,6 +886,9 @@ export interface AppSettings {
   low_stock_threshold: number;
   // User email notifications toggle
   user_notifications_enabled: boolean;
+  // Staggered batch start defaults
+  stagger_group_size: number;
+  stagger_interval_minutes: number;
   // Default sidebar order (admin-set for all users)
   default_sidebar_order: string;
 }

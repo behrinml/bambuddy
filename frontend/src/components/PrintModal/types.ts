@@ -69,6 +69,9 @@ export interface ScheduleOptions {
   scheduledTime: string;
   requirePreviousSuccess: boolean;
   autoOffAfter: boolean;
+  staggerEnabled: boolean;
+  staggerGroupSize: number;
+  staggerIntervalMinutes: number;
 }
 
 /**
@@ -79,6 +82,9 @@ export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   scheduledTime: '',
   requirePreviousSuccess: false,
   autoOffAfter: false,
+  staggerEnabled: false,
+  staggerGroupSize: 2,
+  staggerIntervalMinutes: 5,
 };
 
 /**
@@ -204,4 +210,8 @@ export interface ScheduleOptionsProps {
   timeFormat?: 'system' | '12h' | '24h';
   /** Whether the user has permission to control printers (for auto power off) */
   canControlPrinter?: boolean;
+  /** Show stagger options (only when multiple printers selected in queue mode) */
+  showStagger?: boolean;
+  /** Number of selected printers (for stagger preview) */
+  printerCount?: number;
 }

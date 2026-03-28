@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Calendar, Loader2, Pencil, Printer, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
@@ -121,6 +121,9 @@ export function PrintModal({
         scheduledTime,
         requirePreviousSuccess: queueItem.require_previous_success,
         autoOffAfter: queueItem.auto_off_after,
+        staggerEnabled: false,
+        staggerGroupSize: DEFAULT_SCHEDULE_OPTIONS.staggerGroupSize,
+        staggerIntervalMinutes: DEFAULT_SCHEDULE_OPTIONS.staggerIntervalMinutes,
       };
     }
     return DEFAULT_SCHEDULE_OPTIONS;
@@ -216,6 +219,18 @@ export function PrintModal({
     queryKey: ['settings'],
     queryFn: api.getSettings,
   });
+
+  // Sync stagger defaults from settings once available
+  const staggerDefaultsApplied = useRef(false);
+  useEffect(() => {
+    if (!settings || staggerDefaultsApplied.current || mode === 'edit-queue-item') return;
+    staggerDefaultsApplied.current = true;
+    setScheduleOptions((prev) => ({
+      ...prev,
+      staggerGroupSize: settings.stagger_group_size ?? prev.staggerGroupSize,
+      staggerIntervalMinutes: settings.stagger_interval_minutes ?? prev.staggerIntervalMinutes,
+    }));
+  }, [settings, mode]);
 
   const currencySymbol = getCurrencySymbol(settings?.currency || 'USD');
   const defaultCostPerKg = settings?.default_filament_cost ?? 0;
@@ -665,6 +680,16 @@ export function PrintModal({
       }
     } else {
       // Printer-based assignment: loop through plates × printers
+      // Compute stagger base time once before the loop
+      const useStagger = scheduleOptions.staggerEnabled
+        && mode === 'add-to-queue'
+        && selectedPrinters.length > 1;
+      const staggerBaseTime = useStagger
+        ? (scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
+          ? new Date(scheduleOptions.scheduledTime).getTime()
+          : Date.now())
+        : 0;
+
       let progressCounter = 0;
       for (const plate of platesToQueue) {
         const plateId = plate ? plate.index : selectedPlate;
@@ -713,7 +738,18 @@ export function PrintModal({
               await updateQueueMutation.mutateAsync(updateData);
             } else {
               // Add-to-queue mode OR edit mode with additional entries
-              await addToQueueMutation.mutateAsync(getQueueData(printerId, plateId));
+              const queueData = getQueueData(printerId, plateId);
+              // Apply stagger offset for groups after the first
+              if (useStagger) {
+                const groupIndex = Math.floor(i / scheduleOptions.staggerGroupSize);
+                if (groupIndex > 0) {
+                  const offsetMs = groupIndex * scheduleOptions.staggerIntervalMinutes * 60_000;
+                  queueData.scheduled_time = new Date(staggerBaseTime + offsetMs).toISOString();
+                }
+                // Group 0 with ASAP: no scheduled_time (start immediately)
+                // Group 0 with scheduled: keeps the scheduled_time from getQueueData
+              }
+              await addToQueueMutation.mutateAsync(queueData);
             }
             results.success++;
           } catch (error) {
@@ -986,6 +1022,8 @@ export function PrintModal({
                 dateFormat={settings?.date_format || 'system'}
                 timeFormat={settings?.time_format || 'system'}
                 canControlPrinter={hasPermission('printers:control')}
+                showStagger={mode === 'add-to-queue' && assignmentMode === 'printer' && selectedPrinters.length > 1}
+                printerCount={selectedPrinters.length}
               />
             )}
 

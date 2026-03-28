@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Hand, Power } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Calendar, Clock, Hand, Power, Layers } from 'lucide-react';
 import type { ScheduleOptionsProps, ScheduleType } from './types';
 import {
   formatDateInput,
@@ -24,7 +25,10 @@ export function ScheduleOptionsPanel({
   dateFormat = 'system',
   timeFormat = 'system',
   canControlPrinter = true,
+  showStagger = false,
+  printerCount = 0,
 }: ScheduleOptionsProps) {
+  const { t } = useTranslation();
   const [dateValue, setDateValue] = useState('');
   const [timeValue, setTimeValue] = useState('');
   const [isDateValid, setIsDateValid] = useState(true);
@@ -246,6 +250,75 @@ export function ScheduleOptionsPanel({
           Power off printer when done
         </label>
       </div>
+
+      {/* Stagger start */}
+      {showStagger && options.scheduleType !== 'manual' && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="staggerEnabled"
+              checked={options.staggerEnabled}
+              onChange={(e) => onChange({ ...options, staggerEnabled: e.target.checked })}
+              className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
+            />
+            <label htmlFor="staggerEnabled" className="text-sm flex items-center gap-1 text-bambu-gray">
+              <Layers className="w-3.5 h-3.5" />
+              {t('printModal.staggerPrinterStarts', 'Stagger printer starts')}
+            </label>
+          </div>
+
+          {options.staggerEnabled && (
+            <div className="ml-6 space-y-3">
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">{t('printModal.staggerGroupSize', 'Group size')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={printerCount}
+                    value={options.staggerGroupSize}
+                    onChange={(e) => onChange({ ...options, staggerGroupSize: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">{t('printModal.staggerInterval', 'Interval (min)')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={options.staggerIntervalMinutes}
+                    onChange={(e) => onChange({ ...options, staggerIntervalMinutes: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  />
+                </div>
+              </div>
+              {printerCount > 0 && (() => {
+                const groupCount = Math.ceil(printerCount / options.staggerGroupSize);
+                const lastGroupSize = printerCount % options.staggerGroupSize;
+                const totalMinutes = (groupCount - 1) * options.staggerIntervalMinutes;
+                return (
+                  <p className="text-xs text-bambu-gray">
+                    {t('printModal.staggerPreview', '{{printers}} printers → {{groups}} groups of {{size}}, starting every {{interval}} min', {
+                      printers: printerCount,
+                      groups: groupCount,
+                      size: options.staggerGroupSize,
+                      interval: options.staggerIntervalMinutes,
+                    })}
+                    {lastGroupSize !== 0 && options.staggerGroupSize < printerCount
+                      ? ` (${t('printModal.staggerLastGroup', 'last group: {{count}}', { count: lastGroupSize })})`
+                      : ''}
+                    {groupCount > 1
+                      ? ` (${t('printModal.staggerTotal', 'total: {{minutes}} min', { minutes: totalMinutes })})`
+                      : ''}
+                  </p>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Help text */}
       <p className="text-xs text-bambu-gray">

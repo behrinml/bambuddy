@@ -222,6 +222,55 @@ describe('SettingsPage', () => {
     });
   });
 
+  describe('Queue tab', () => {
+    it('can switch to Queue tab', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Queue')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Queue'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Staggered Start')).toBeInTheDocument();
+      });
+    });
+
+    it('shows stagger settings on Queue tab', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Queue')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Queue'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Staggered Start')).toBeInTheDocument();
+        expect(screen.getByText('Group size')).toBeInTheDocument();
+        expect(screen.getByText('Interval (minutes)')).toBeInTheDocument();
+      });
+    });
+
+    it('shows auto-drying settings on Queue tab', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Queue')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Queue'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Queue Auto-Drying')).toBeInTheDocument();
+      });
+    });
+  });
+
   describe('API Keys tab', () => {
     it('can switch to API Keys tab', async () => {
       const user = userEvent.setup();
