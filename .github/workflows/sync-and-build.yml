@@ -17,27 +17,32 @@ jobs:
       # Das hier ist neu und behebt den Fehler:
       id-token: write
       actions: write
-      # Erlaubt das Verwalten von Workflows:
-      workflows: write 
 
     steps:
       # ... (alle Schritte bis zum Tagging bleiben gleich) ...
 
-      - name: Get Version and Increment Build Number
+      - name: Sync with Upstream & Get Version
         id: vars
         run: |
+          # 1. Upstream einrichten
           git remote add upstream https://github.com/maziggy/bambuddy.git
           git fetch upstream --tags
           
+          # 2. Upstream Version bestimmen
           UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "v0.0.0")
-          
-          if git merge upstream/main --no-edit; then
-            echo "Merge erfolgreich."
-          else
-            echo "KONFLIKT!"
-            exit 1
-          fi
 
+          # 3. MERGE-STRATEGIE: Wir mergen, aber behalten UNSERE Workflows
+          # Wir starten den Merge, schließen ihn aber nicht sofort ab (--no-commit)
+          git merge upstream/main --no-commit --no-ff || true
+          
+          # Wir setzen den Workflow-Ordner auf unseren Stand zurück
+          # Dadurch werden keine fremden Workflows verändert/hinzugefügt
+          git checkout HEAD -- .github/workflows
+          
+          # Jetzt den Merge finalisieren
+          git commit -m "chore: sync with upstream $UPSTREAM_TAG (preserved local workflows)" || echo "Nichts zu committen"
+
+          # 4. Build-Zähler ermitteln
           MY_LATEST_BUILD=$(git tag -l "${UPSTREAM_TAG}_*" --sort=-v:refname | head -n 1)
           
           if [ -z "$MY_LATEST_BUILD" ]; then
@@ -49,10 +54,11 @@ jobs:
           
           CUSTOM_TAG="${UPSTREAM_TAG}_${BUILD_NUMBER}"
           
+          # Outputs setzen
           echo "CUSTOM_TAG=$CUSTOM_TAG" >> $GITHUB_OUTPUT
           echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           
-          # NUR das eigene neue Tag pushen, nicht alle (--tags vermeiden)
+          # 5. Nur DAS EINE TAG und den Branch pushen
           git tag $CUSTOM_TAG
           git push origin vs-production
           git push origin refs/tags/$CUSTOM_TAG
