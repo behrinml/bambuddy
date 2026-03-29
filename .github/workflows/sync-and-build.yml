@@ -8,60 +8,92 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-      # Das hier ist neu und behebt den Fehler:
-      id-token: write
-      actions: write
 
     steps:
-      # ... (alle Schritte bis zum Tagging bleiben gleich) ...
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          if ! git remote get-url upstream >/dev/null 2>&1; then
+            git remote add upstream https://github.com/maziggy/bambuddy.git
+          else
+            git remote set-url upstream https://github.com/maziggy/bambuddy.git
+          fi
+          git fetch upstream --tags --prune
 
       - name: Sync with Upstream & Get Version
         id: vars
         run: |
-          # 1. Upstream einrichten
-          git remote add upstream https://github.com/maziggy/bambuddy.git
-          git fetch upstream --tags
-          
-          # 2. Upstream Version bestimmen
+          set -euo pipefail
+
+          # 1. Stelle sicher, dass wir auf dem Zielbranch sind
+          git checkout vs-production
+
+          # 2. Bestimme das neueste Tag auf upstream/main (Fallback v0.0.0)
+          #    Wir haben upstream bereits gefetcht; describe funktioniert dann.
           UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "v0.0.0")
+          echo "Found upstream tag: $UPSTREAM_TAG"
 
-          # 3. MERGE-STRATEGIE: Wir mergen, aber behalten UNSERE Workflows
-          # Wir starten den Merge, schließen ihn aber nicht sofort ab (--no-commit)
+          # 3. Merge upstream/main, aber ohne fremde Workflows zu übernehmen
+          #    --no-commit damit wir die .github/workflows zurücksetzen können
           git merge upstream/main --no-commit --no-ff || true
-          
-          # Wir setzen den Workflow-Ordner auf unseren Stand zurück
-          # Dadurch werden keine fremden Workflows verändert/hinzugefügt
-          git checkout HEAD -- .github/workflows
-          
-          # Jetzt den Merge finalisieren
-          git commit -m "chore: sync with upstream $UPSTREAM_TAG (preserved local workflows)" || echo "Nichts zu committen"
 
-          # 4. Build-Zähler ermitteln
-          MY_LATEST_BUILD=$(git tag -l "${UPSTREAM_TAG}_*" --sort=-v:refname | head -n 1)
-          
+          # 4. Workflow-Ordner auf unseren Stand zurücksetzen (keine fremden workflows)
+          git checkout --ours -- .github/workflows || true
+          # Falls Dateien aus upstream entfernt wurden, stellen wir sicher, dass nichts entfernt wird:
+          git restore --staged .github/workflows || true
+
+          # 5. Commit falls Änderungen vorhanden
+          if ! git diff --quiet --staged; then
+            git commit -m "chore: sync with upstream $UPSTREAM_TAG (preserved local workflows)"
+          else
+            echo "No changes to commit after merge."
+          fi
+
+          # 6. Bestimme nächstes Build-Number anhand vorhandener Tags
+          #    Wir suchen Tags wie vX.Y.Z_1, vX.Y.Z_2 ...
+          #    Stelle sicher, dass lokale Tags aktuell sind (fetch origin --tags oben)
+          PATTERN="${UPSTREAM_TAG}_*"
+          MY_LATEST_BUILD=$(git tag -l "${PATTERN}" --sort=-v:refname | head -n 1 || true)
+
           if [ -z "$MY_LATEST_BUILD" ]; then
             BUILD_NUMBER=1
           else
-            LAST_NUMBER=$(echo $MY_LATEST_BUILD | sed 's/.*_//')
-            BUILD_NUMBER=$((LAST_NUMBER + 1))
+            LAST_NUMBER=$(echo "$MY_LATEST_BUILD" | sed 's/.*_//')
+            # Fallback falls LAST_NUMBER kein Integer ist
+            if ! echo "$LAST_NUMBER" | grep -Eq '^[0-9]+$'; then
+              BUILD_NUMBER=1
+            else
+              BUILD_NUMBER=$((LAST_NUMBER + 1))
+            fi
           fi
-          
+
           CUSTOM_TAG="${UPSTREAM_TAG}_${BUILD_NUMBER}"
-          
-          # Outputs setzen
-          echo "CUSTOM_TAG=$CUSTOM_TAG" >> $GITHUB_OUTPUT
-          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
-          
-          # 5. Nur DAS EINE TAG und den Branch pushen
-          git tag $CUSTOM_TAG
+          echo "CUSTOM_TAG=$CUSTOM_TAG" >> "$GITHUB_OUTPUT"
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_OUTPUT"
+
+          # 7. Tag erstellen und pushen
+          git tag -a "$CUSTOM_TAG" -m "Release $CUSTOM_TAG (sync from $UPSTREAM_TAG)"
           git push origin vs-production
-          git push origin refs/tags/$CUSTOM_TAG
+          git push origin "refs/tags/$CUSTOM_TAG"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
