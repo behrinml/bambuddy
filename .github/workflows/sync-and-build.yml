@@ -1,0 +1,65 @@
+name: Sync & Build BamBuddy Custom
+
+on:
+  push:
+    branches:
+      - vs-production
+
+  schedule:
+    - cron: '0 3 * * *' # Täglich um 03:00 Uhr nachts
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: vs-production
+          fetch-depth: 0 # Wichtig für den Merge-Verlauf
+
+      - name: Setup Git User
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+
+      - name: Sync with Upstream
+        run: |
+          # Upstream hinzufügen und das neueste Release holen
+          git remote add upstream https://github.com/maziggy/bambuddy.git
+          git fetch upstream
+
+          # Versuchen, upstream/main (das Release) in deinen Branch zu mergen
+          # --no-edit verhindert, dass der Editor für die Merge-Message aufgeht
+          if git merge upstream/main --no-edit; then
+            echo "Sync erfolgreich oder bereits aktuell."
+            git push origin vs-production
+          else
+            echo "KONFLIKT: Automatischer Merge fehlgeschlagen. Du musst manuell ran!"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/bambuddy-custom:latest
+            ghcr.io/${{ github.repository_owner }}/bambuddy-custom:${{ github.sha }}
