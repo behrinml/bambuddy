@@ -14,62 +14,48 @@ jobs:
     permissions:
       contents: write
       packages: write
+      # Das hier ist neu und behebt den Fehler:
+      id-token: write
+      actions: write
+      # Erlaubt das Verwalten von Workflows:
+      workflows: write 
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: vs-production
-          fetch-depth: 0 # Holt alle Tags für den Vergleich
+      # ... (alle Schritte bis zum Tagging bleiben gleich) ...
 
-      - name: Setup Git User
-        run: |
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
-
-      - name: Sync with Upstream & Get Version
+      - name: Get Version and Increment Build Number
         id: vars
         run: |
-          # 1. Upstream einrichten
           git remote add upstream https://github.com/maziggy/bambuddy.git
           git fetch upstream --tags
           
-          # 2. Das aktuellste Tag vom Original-Repo finden
-          # Falls kein Tag existiert, nehmen wir "v0.0.0" als Fallback
           UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "v0.0.0")
-          echo "Upstream Version: $UPSTREAM_TAG"
-
-          # 3. Merge durchführen
+          
           if git merge upstream/main --no-edit; then
             echo "Merge erfolgreich."
           else
-            echo "KONFLIKT beim Mergen von upstream/main!"
+            echo "KONFLIKT!"
             exit 1
           fi
 
-          # 4. Build-Zähler ermitteln
-          # Wir suchen nach deinen Tags, die mit dem Upstream-Tag beginnen (z.B. v1.2.3_*)
           MY_LATEST_BUILD=$(git tag -l "${UPSTREAM_TAG}_*" --sort=-v:refname | head -n 1)
           
           if [ -z "$MY_LATEST_BUILD" ]; then
             BUILD_NUMBER=1
           else
-            # Nummer nach dem Unterstrich extrahieren und erhöhen
             LAST_NUMBER=$(echo $MY_LATEST_BUILD | sed 's/.*_//')
             BUILD_NUMBER=$((LAST_NUMBER + 1))
           fi
           
           CUSTOM_TAG="${UPSTREAM_TAG}_${BUILD_NUMBER}"
-          echo "Neues Custom Tag: $CUSTOM_TAG"
           
-          # Outputs für Docker-Schritt setzen
           echo "CUSTOM_TAG=$CUSTOM_TAG" >> $GITHUB_OUTPUT
           echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           
-          # 5. Tag erstellen und pushen
+          # NUR das eigene neue Tag pushen, nicht alle (--tags vermeiden)
           git tag $CUSTOM_TAG
-          git push origin vs-production --tags
           git push origin vs-production
+          git push origin refs/tags/$CUSTOM_TAG
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
