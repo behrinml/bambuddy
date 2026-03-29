@@ -1,12 +1,12 @@
-name: Sync & Build
+name: Sync & Build BamBuddy Custom
 
 on:
   push:
     branches:
       - vs-production
   schedule:
-    - cron: '0 3 * * *' # Täglich um 03:00 Uhr nachts
-  workflow_dispatch: # Erlaubt manuelles Auslösen über das GitHub-UI
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,72 +20,61 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: vs-production
-          fetch-depth: 0 # Wichtig, um alle Tags für den Zähler zu sehen
+          fetch-depth: 0 # Holt alle Tags für den Vergleich
 
       - name: Setup Git User
         run: |
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
 
-      - name: Sync with Upstream
+      - name: Sync with Upstream & Get Version
+        id: vars
         run: |
-          # Upstream hinzufügen und das neueste Release holen
+          # 1. Upstream einrichten
           git remote add upstream https://github.com/maziggy/bambuddy.git
-          git fetch upstream
+          git fetch upstream --tags
           
-          # Versuchen, upstream/main in deinen Branch vs-production zu mergen
+          # 2. Das aktuellste Tag vom Original-Repo finden
+          # Falls kein Tag existiert, nehmen wir "v0.0.0" als Fallback
+          UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "v0.0.0")
+          echo "Upstream Version: $UPSTREAM_TAG"
+
+          # 3. Merge durchführen
           if git merge upstream/main --no-edit; then
-            echo "Sync erfolgreich oder bereits aktuell."
+            echo "Merge erfolgreich."
           else
-            echo "KONFLIKT: Automatischer Merge fehlgeschlagen. Du musst manuell ran!"
+            echo "KONFLIKT beim Mergen von upstream/main!"
             exit 1
           fi
 
-      - name: Get Version and Increment Build Number
-        id: vars
-        run: |
-          # 1. Pfad zur package.json prüfen (BamBuddy nutzt meist den backend-Ordner)
-          PACKAGE_PATH="./backend/package.json"
+          # 4. Build-Zähler ermitteln
+          # Wir suchen nach deinen Tags, die mit dem Upstream-Tag beginnen (z.B. v1.2.3_*)
+          MY_LATEST_BUILD=$(git tag -l "${UPSTREAM_TAG}_*" --sort=-v:refname | head -n 1)
           
-          if [ ! -f "$PACKAGE_PATH" ]; then
-            echo "Fehler: $PACKAGE_PATH nicht gefunden! Prüfe die Ordnerstruktur."
-            # Falls sie doch im Root liegt, Fallback:
-            if [ -f "./package.json" ]; then PACKAGE_PATH="./package.json"; fi
-          fi
-
-          # Version aus der package.json extrahieren
-          RAW_VERSION=$(node -p "require('$PACKAGE_PATH').version")
-          echo "Base Version: $RAW_VERSION"
-          
-          # 2. Bestehende Tags für diese Version zählen
-          # Wir laden explizit alle Tags, um sicher zu gehen
-          git fetch --tags
-          LATEST_TAG=$(git tag -l "${RAW_VERSION}_*" --sort=-v:refname | head -n 1)
-          
-          if [ -z "$LATEST_TAG" ]; then
+          if [ -z "$MY_LATEST_BUILD" ]; then
             BUILD_NUMBER=1
           else
-            # Extrahiere die Zahl nach dem Unterstrich
-            LAST_NUMBER=$(echo $LATEST_TAG | sed 's/.*_//')
+            # Nummer nach dem Unterstrich extrahieren und erhöhen
+            LAST_NUMBER=$(echo $MY_LATEST_BUILD | sed 's/.*_//')
             BUILD_NUMBER=$((LAST_NUMBER + 1))
           fi
           
-          CUSTOM_TAG="${RAW_VERSION}_${BUILD_NUMBER}"
-          echo "New Custom Tag: $CUSTOM_TAG"
+          CUSTOM_TAG="${UPSTREAM_TAG}_${BUILD_NUMBER}"
+          echo "Neues Custom Tag: $CUSTOM_TAG"
           
-          # Variablen für die nächsten Schritte speichern
+          # Outputs für Docker-Schritt setzen
           echo "CUSTOM_TAG=$CUSTOM_TAG" >> $GITHUB_OUTPUT
-          echo "VERSION=$RAW_VERSION" >> $GITHUB_OUTPUT
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           
-          # 3. Das neue Tag lokal setzen und pushen
+          # 5. Tag erstellen und pushen
           git tag $CUSTOM_TAG
-          git push origin --tags
+          git push origin vs-production --tags
           git push origin vs-production
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry (GHCR)
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -97,8 +86,7 @@ jobs:
         with:
           context: .
           push: true
-          # Wir taggen mit latest, der reinen Version und deiner Build-Version
           tags: |
             ghcr.io/${{ github.repository_owner }}/bambuddy-custom:latest
             ghcr.io/${{ github.repository_owner }}/bambuddy-custom:${{ steps.vars.outputs.CUSTOM_TAG }}
-            ghcr.io/${{ github.repository_owner }}/bambuddy-custom:${{ steps.vars.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/bambuddy-custom:${{ steps.vars.outputs.UPSTREAM_TAG }}
