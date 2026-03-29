@@ -44,20 +44,29 @@ jobs:
       - name: Get Version and Increment Build Number
         id: vars
         run: |
-          # 1. Version aus der package.json extrahieren
-          RAW_VERSION=$(node -p "require('./package.json').version")
+          # 1. Pfad zur package.json prüfen (BamBuddy nutzt meist den backend-Ordner)
+          PACKAGE_PATH="./backend/package.json"
+          
+          if [ ! -f "$PACKAGE_PATH" ]; then
+            echo "Fehler: $PACKAGE_PATH nicht gefunden! Prüfe die Ordnerstruktur."
+            # Falls sie doch im Root liegt, Fallback:
+            if [ -f "./package.json" ]; then PACKAGE_PATH="./package.json"; fi
+          fi
+
+          # Version aus der package.json extrahieren
+          RAW_VERSION=$(node -p "require('$PACKAGE_PATH').version")
           echo "Base Version: $RAW_VERSION"
           
           # 2. Bestehende Tags für diese Version zählen
-          # Wir suchen Tags im Format '1.2.3_X' und nehmen das mit der höchsten Zahl
+          # Wir laden explizit alle Tags, um sicher zu gehen
+          git fetch --tags
           LATEST_TAG=$(git tag -l "${RAW_VERSION}_*" --sort=-v:refname | head -n 1)
           
           if [ -z "$LATEST_TAG" ]; then
-            # Wenn für diese Version noch kein Tag existiert (neues Release!), starte bei 1
             BUILD_NUMBER=1
           else
-            # Extrahiere die Zahl nach dem Unterstrich und erhöhe sie um 1
-            LAST_NUMBER=$(echo $LATEST_TAG | awk -F'_' '{print $2}')
+            # Extrahiere die Zahl nach dem Unterstrich
+            LAST_NUMBER=$(echo $LATEST_TAG | sed 's/.*_//')
             BUILD_NUMBER=$((LAST_NUMBER + 1))
           fi
           
@@ -68,10 +77,9 @@ jobs:
           echo "CUSTOM_TAG=$CUSTOM_TAG" >> $GITHUB_OUTPUT
           echo "VERSION=$RAW_VERSION" >> $GITHUB_OUTPUT
           
-          # 3. Das neue Tag lokal setzen und in deinen Fork pushen
+          # 3. Das neue Tag lokal setzen und pushen
           git tag $CUSTOM_TAG
-          git push origin vs-production --tags
-          # Auch den Merge-Stand (vs-production) pushen
+          git push origin --tags
           git push origin vs-production
 
       - name: Set up Docker Buildx
