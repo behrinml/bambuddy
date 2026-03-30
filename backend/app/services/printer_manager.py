@@ -520,9 +520,11 @@ def get_derived_status_name(state: PrinterState, model: str | None = None) -> st
         state: The printer state to analyze
         model: Optional printer model for model-specific workarounds
     """
-    # A1/A1 Mini firmware bug: some versions report stg_cur=0 when idle
-    # Only correct this specific case (IDLE + stg_cur=0) for affected models
-    if state.state == "IDLE" and state.stg_cur == 0 and has_stg_cur_idle_bug(model):
+    # Firmware bug: some models (A1, P1P, P1S) report stg_cur=0 when not printing.
+    # stg_cur=0 maps to "Printing" in STAGE_NAMES, which incorrectly overrides the
+    # real state (IDLE, FINISH, FAILED, etc.). Only trust stg_cur when the printer
+    # is actually in an active print state (RUNNING or PAUSE).
+    if state.state not in ("RUNNING", "PAUSE") and state.stg_cur == 0 and has_stg_cur_idle_bug(model):
         return None
 
     # If we have a valid calibration stage, use it
