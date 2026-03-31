@@ -1247,7 +1247,7 @@ export default {
       general: 'Allgemein',
       smartPlugs: 'Smart Plugs',
       notifications: 'Benachrichtigungen',
-      queue: 'Queue',
+      queue: 'Workflow',
       filament: 'Filament',
       network: 'Netzwerk',
       apiKeys: 'API-Schlüssel',

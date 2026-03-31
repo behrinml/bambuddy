@@ -1246,7 +1246,7 @@ export default {
       general: '一般',
       smartPlugs: 'スマートプラグ',
       notifications: '通知',
-      queue: 'Queue',
+      queue: 'ワークフロー',
       filament: 'フィラメント',
       network: 'ネットワーク',
       apiKeys: 'APIキー',

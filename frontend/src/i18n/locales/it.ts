@@ -1247,7 +1247,7 @@ export default {
       general: 'Generale',
       smartPlugs: 'Prese smart',
       notifications: 'Notifiche',
-      queue: 'Queue',
+      queue: 'Workflow',
       filament: 'Filamento',
       network: 'Rete',
       apiKeys: 'Chiavi API',

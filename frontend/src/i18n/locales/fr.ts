@@ -1247,7 +1247,7 @@ export default {
       general: 'Général',
       smartPlugs: 'Prises connectées',
       notifications: 'Notifications',
-      queue: 'Queue',
+      queue: 'Workflow',
       filament: 'Filament',
       network: 'Réseau',
       apiKeys: 'Clés API',

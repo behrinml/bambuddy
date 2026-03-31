@@ -1247,7 +1247,7 @@ export default {
       general: '通用',
       smartPlugs: '智能插座',
       notifications: '通知',
-      queue: 'Queue',
+      queue: '工作流',
       filament: '耗材',
       network: '网络',
       apiKeys: 'API 密钥',

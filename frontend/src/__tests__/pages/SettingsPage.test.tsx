@@ -222,31 +222,31 @@ describe('SettingsPage', () => {
     });
   });
 
-  describe('Queue tab', () => {
-    it('can switch to Queue tab', async () => {
+  describe('Workflow tab', () => {
+    it('can switch to Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Queue')).toBeInTheDocument();
+        expect(screen.getByText('Workflow')).toBeInTheDocument();
       });
 
-      await user.click(screen.getByText('Queue'));
+      await user.click(screen.getByText('Workflow'));
 
       await waitFor(() => {
         expect(screen.getByText('Staggered Start')).toBeInTheDocument();
       });
     });
 
-    it('shows stagger settings on Queue tab', async () => {
+    it('shows stagger settings on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Queue')).toBeInTheDocument();
+        expect(screen.getByText('Workflow')).toBeInTheDocument();
       });
 
-      await user.click(screen.getByText('Queue'));
+      await user.click(screen.getByText('Workflow'));
 
       await waitFor(() => {
         expect(screen.getByText('Staggered Start')).toBeInTheDocument();
@@ -255,15 +255,15 @@ describe('SettingsPage', () => {
       });
     });
 
-    it('shows auto-drying settings on Queue tab', async () => {
+    it('shows auto-drying settings on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Queue')).toBeInTheDocument();
+        expect(screen.getByText('Workflow')).toBeInTheDocument();
       });
 
-      await user.click(screen.getByText('Queue'));
+      await user.click(screen.getByText('Workflow'));
 
       await waitFor(() => {
         expect(screen.getByText('Queue Auto-Drying')).toBeInTheDocument();

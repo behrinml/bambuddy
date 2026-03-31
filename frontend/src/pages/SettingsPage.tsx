@@ -1004,7 +1004,7 @@ export function SettingsPage() {
           }`}
         >
           <ListOrdered className="w-4 h-4" />
-          {t('settings.tabs.queue', 'Queue')}
+          {t('settings.tabs.queue', 'Workflow')}
         </button>
         <button
           onClick={() => handleTabChange('filament')}
@@ -3613,6 +3613,32 @@ export function SettingsPage() {
               </CardContent>
             </Card>
 
+            {/* Per-Printer Mapping Default */}
+            <Card>
+              <CardHeader>
+                <h2 className="text-lg font-semibold text-white">{t('settings.printModal')}</h2>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white">{t('settings.expandCustomMapping')}</p>
+                    <p className="text-sm text-bambu-gray">
+                      {t('settings.expandCustomMappingDescription')}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.per_printer_mapping_expanded ?? false}
+                      onChange={(e) => updateSetting('per_printer_mapping_expanded', e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                  </label>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <h2 className="text-lg font-semibold text-white">{t('settings.amsDisplayThresholds')}</h2>
@@ -3744,32 +3770,6 @@ export function SettingsPage() {
                   </p>
                 </div>
 
-                {/* Per-Printer Mapping Default */}
-                <div className="space-y-3 pt-4 border-t border-bambu-dark-tertiary">
-                  <div className="flex items-center gap-2 text-white">
-                    <Printer className="w-4 h-4 text-bambu-green" />
-                    <span className="font-medium">{t('settings.printModal')}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="block text-sm text-white">
-                        {t('settings.expandCustomMapping')}
-                      </label>
-                      <p className="text-xs text-bambu-gray mt-0.5">
-                        {t('settings.expandCustomMappingDescription')}
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={localSettings.per_printer_mapping_expanded ?? false}
-                        onChange={(e) => updateSetting('per_printer_mapping_expanded', e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
-                    </label>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </div>
