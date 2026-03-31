@@ -298,10 +298,11 @@ def extract_nozzle_mapping_from_3mf(zf: zipfile.ZipFile) -> dict[int, int] | Non
         # Check if only one extruder is active.
         # If so, we can skip the mapping and just assign all slots to that extruder.
         # For reference: "extruder_nozzle_stats": ["Standard#0|High Flow#0","Standard#1"]
-        active_extruders = [
-            1 if any(n.partition("#")[2] != "0" and n.partition("#")[2] != "" for n in s.split("|")) else 0
-            for s in (data.get("extruder_nozzle_stats") or [])
-        ]
+        active_extruders = []
+        for stats_str in (data.get("extruder_nozzle_stats") or []):
+            nozzle_counts = [n.partition("#")[2] for n in stats_str.split("|")]
+            active_extruders.append(1 if any(c not in ("0", "") for c in nozzle_counts) else 0)
+        
         if sum(active_extruders) == 1:
             nozzle_mapping: dict[int, int] = {}
             active_idx = active_extruders.index(1)
@@ -314,7 +315,7 @@ def extract_nozzle_mapping_from_3mf(zf: zipfile.ZipFile) -> dict[int, int] | Non
                         nozzle_mapping[int(filament_elem.get("id"))] = target_extruder
                     except (ValueError, TypeError):
                         pass
-            return nozzle_mapping
+            return nozzle_mapping or None
 
         # Priority 1: Use group_id from slice_info filament elements.
         # This reflects the actual slicer assignment (respects "Auto For Flush").
