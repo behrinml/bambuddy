@@ -2602,7 +2602,7 @@ export const api = {
     request<{ used_bytes: number | null; free_bytes: number | null }>(`/printers/${printerId}/storage`),
 
   // Archives
-  getArchives: (printerId?: number, projectId?: number, limit = 50, offset = 0, dateFrom?: string, dateTo?: string) => {
+  getArchives: (printerId?: number, projectId?: number, limit = 10000, offset = 0, dateFrom?: string, dateTo?: string) => {
     const params = new URLSearchParams();
     if (printerId) params.set('printer_id', String(printerId));
     if (projectId) params.set('project_id', String(projectId));
