@@ -360,6 +360,12 @@ def smart_plug_factory(db_session):
             defaults["mqtt_state_on_value"] = kwargs.get("mqtt_state_on_value")
             defaults["ip_address"] = None
             defaults["ha_entity_id"] = None
+        elif plug_type == "rest":
+            defaults["rest_on_url"] = kwargs.get("rest_on_url", "http://192.168.1.100/api/plug/on")
+            defaults["rest_off_url"] = kwargs.get("rest_off_url", "http://192.168.1.100/api/plug/off")
+            defaults["rest_method"] = kwargs.get("rest_method", "POST")
+            defaults["ip_address"] = None
+            defaults["ha_entity_id"] = None
         else:
             defaults["ip_address"] = "192.168.1.100"
             defaults["ha_entity_id"] = None

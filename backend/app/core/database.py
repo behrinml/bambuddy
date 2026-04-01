@@ -1563,6 +1563,52 @@ async def run_migrations(conn):
     except OperationalError:
         pass  # Already applied
 
+    # Migration: Add REST/Webhook smart plug fields
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_on_url VARCHAR(500)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_on_body TEXT"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_off_url VARCHAR(500)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_off_body TEXT"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_method VARCHAR(10)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_headers TEXT"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_status_url VARCHAR(500)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_status_path VARCHAR(200)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_status_on_value VARCHAR(50)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_power_path VARCHAR(200)"))
+    except OperationalError:
+        pass  # Already applied
+    try:
+        await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_energy_path VARCHAR(200)"))
+    except OperationalError:
+        pass  # Already applied
+
     # Seed default settings keys that must exist on fresh install
     default_settings = [
         ("advanced_auth_enabled", "false"),
