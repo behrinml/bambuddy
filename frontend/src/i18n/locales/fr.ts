@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: 'Plateau vidé — prêt pour l\'impression suivante',
     plateReady: 'Plateau vidé — prêt pour l\'impression suivante',
     plateNumber: 'Plateau {{index}}',
+    // Batch / quantity
+    quantity: 'Quantité',
+    quantityHint: 'Crée {{count}} éléments de file d\'attente',
+    activeBatches: 'Lots actifs',
+    batchProgress: '{{completed}} sur {{total}} terminés',
+    cancelBatch: 'Annuler les restants',
+    batchCancelled: 'Éléments restants du lot annulés',
+    cancelBatchConfirmTitle: 'Annuler le lot',
+    cancelBatchConfirmMessage: 'Annuler tous les éléments en attente restants dans ce lot ?',
+    batch: 'Lot',
     // Sections
     sections: {
       currentlyPrinting: 'En cours',

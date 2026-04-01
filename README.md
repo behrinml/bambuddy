@@ -108,6 +108,7 @@ Perfect for remote print farms, traveling makers, or accessing your home printer
 - **Background print dispatch** — FTP uploads and print-start commands run in the background with real-time WebSocket progress toasts (per-job upload bars, status badges, cancel button)
 - Print queue with drag-and-drop and timeline schedule view
 - Multi-printer selection (send to multiple printers at once)
+- Batch print quantity (print multiple copies — set quantity in the print/schedule dialog, first copy prints immediately, rest are queued)
 - Staggered batch start (start printers in groups with configurable interval to avoid power spikes — works in both Print and Queue dialogs)
 - Configurable default print options (bed levelling, flow/vibration calibration, first layer inspection, timelapse) in Settings → Workflow
 - Model-based queue assignment (send to "any X1C" for load balancing) with location filtering

@@ -95,6 +95,7 @@ async def init_db():
         notification_template,
         orca_base_cache,
         pending_upload,
+        print_batch,
         print_log,
         print_queue,
         printer,
@@ -1608,6 +1609,14 @@ async def run_migrations(conn):
         await conn.execute(text("ALTER TABLE smart_plugs ADD COLUMN rest_energy_path VARCHAR(200)"))
     except OperationalError:
         pass  # Already applied
+
+    # Migration: Add batch_id column to print_queue for batch grouping
+    try:
+        await conn.execute(
+            text("ALTER TABLE print_queue ADD COLUMN batch_id INTEGER REFERENCES print_batches(id) ON DELETE SET NULL")
+        )
+    except OperationalError:
+        pass
 
     # Seed default settings keys that must exist on fresh install
     default_settings = [

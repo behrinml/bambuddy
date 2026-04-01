@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: 'Druckplatte freigegeben — bereit für nächsten Druck',
     plateReady: 'Druckplatte freigegeben — bereit für nächsten Druck',
     plateNumber: 'Platte {{index}}',
+    // Batch / quantity
+    quantity: 'Menge',
+    quantityHint: 'Erstellt {{count}} Warteschlangeneinträge',
+    activeBatches: 'Aktive Stapel',
+    batchProgress: '{{completed}} von {{total}} abgeschlossen',
+    cancelBatch: 'Verbleibende abbrechen',
+    batchCancelled: 'Verbleibende Stapeleinträge abgebrochen',
+    cancelBatchConfirmTitle: 'Stapel abbrechen',
+    cancelBatchConfirmMessage: 'Alle verbleibenden ausstehenden Einträge in diesem Stapel abbrechen?',
+    batch: 'Stapel',
     // Sections
     sections: {
       currentlyPrinting: 'Aktuell druckend',

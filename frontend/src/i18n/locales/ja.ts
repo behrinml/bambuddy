@@ -855,6 +855,16 @@ export default {
     clearPlateSuccess: 'プレートをクリアしました — 次の印刷の準備完了',
     plateReady: 'プレートをクリアしました — 次の印刷の準備完了',
     plateNumber: 'プレート {{index}}',
+    // Batch / quantity
+    quantity: '数量',
+    quantityHint: '{{count}}件のキューアイテムを作成',
+    activeBatches: 'アクティブなバッチ',
+    batchProgress: '{{total}}件中{{completed}}件完了',
+    cancelBatch: '残りをキャンセル',
+    batchCancelled: '残りのバッチアイテムをキャンセルしました',
+    cancelBatchConfirmTitle: 'バッチをキャンセル',
+    cancelBatchConfirmMessage: 'このバッチの残りの保留中アイテムをすべてキャンセルしますか？',
+    batch: 'バッチ',
     // Sections
     sections: {
       currentlyPrinting: '印刷中',

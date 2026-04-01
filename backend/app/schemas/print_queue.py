@@ -40,6 +40,8 @@ class PrintQueueItemCreate(BaseModel):
     layer_inspect: bool = False
     timelapse: bool = False
     use_ams: bool = True
+    # Batch: create multiple copies (creates a batch if > 1)
+    quantity: int = 1
 
 
 class PrintQueueItemUpdate(BaseModel):
@@ -111,6 +113,10 @@ class PrintQueueItemResponse(BaseModel):
     created_by_id: int | None = None
     created_by_username: str | None = None
 
+    # Batch grouping
+    batch_id: int | None = None
+    batch_name: str | None = None
+
     class Config:
         from_attributes = True
 
@@ -149,3 +155,26 @@ class PrintQueueBulkUpdateResponse(BaseModel):
     updated_count: int
     skipped_count: int  # Items that were not pending
     message: str
+
+
+class PrintBatchResponse(BaseModel):
+    """Response for a print batch with progress stats."""
+
+    id: int
+    name: str
+    archive_id: int | None = None
+    library_file_id: int | None = None
+    quantity: int
+    status: str
+    created_at: UTCDatetime
+    created_by_id: int | None = None
+    created_by_username: str | None = None
+    # Derived counts
+    pending_count: int = 0
+    printing_count: int = 0
+    completed_count: int = 0
+    failed_count: int = 0
+    cancelled_count: int = 0
+
+    class Config:
+        from_attributes = True

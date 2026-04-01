@@ -1365,6 +1365,26 @@ export interface PrintQueueItem {
   // User tracking (Issue #206)
   created_by_id?: number | null;
   created_by_username?: string | null;
+  // Batch grouping
+  batch_id?: number | null;
+  batch_name?: string | null;
+}
+
+export interface PrintBatch {
+  id: number;
+  name: string;
+  archive_id: number | null;
+  library_file_id: number | null;
+  quantity: number;
+  status: string;
+  created_at: string;
+  created_by_id: number | null;
+  created_by_username: string | null;
+  pending_count: number;
+  printing_count: number;
+  completed_count: number;
+  failed_count: number;
+  cancelled_count: number;
 }
 
 export interface PrintQueueItemCreate {
@@ -1387,6 +1407,8 @@ export interface PrintQueueItemCreate {
   layer_inspect?: boolean;
   timelapse?: boolean;
   use_ams?: boolean;
+  // Batch: create multiple copies (creates a batch if > 1)
+  quantity?: number;
 }
 
 export interface PrintQueueItemUpdate {
@@ -3448,6 +3470,14 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+  // Batches
+  getBatches: (status?: string) => {
+    const params = status ? `?status=${status}` : '';
+    return request<PrintBatch[]>(`/queue/batches${params}`);
+  },
+  getBatch: (id: number) => request<PrintBatch>(`/queue/batches/${id}`),
+  cancelBatch: (id: number) =>
+    request<{ message: string }>(`/queue/batches/${id}`, { method: 'DELETE' }),
 
   // K-Profiles
   getKProfiles: (printerId: number, nozzleDiameter = '0.4') =>

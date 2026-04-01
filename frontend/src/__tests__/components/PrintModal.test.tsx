@@ -48,6 +48,8 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   archive_thumbnail: null,
   printer_name: 'Test Printer',
   print_time_seconds: 3600,
+  batch_id: null,
+  batch_name: null,
   ...overrides,
 });
 
@@ -1055,6 +1057,87 @@ describe('PrintModal', () => {
       expect((queueRequests[0] as { plate_id: number }).plate_id).toBe(1);
       expect((queueRequests[1] as { plate_id: number }).plate_id).toBe(2);
       expect((queueRequests[2] as { plate_id: number }).plate_id).toBe(3);
+    });
+  });
+
+  describe('batch quantity', () => {
+    it('shows quantity input in reprint mode', () => {
+      render(
+        <PrintModal
+          mode="reprint"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      expect(screen.getByLabelText('Quantity')).toBeInTheDocument();
+    });
+
+    it('shows quantity input in add-to-queue mode', () => {
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      expect(screen.getByLabelText('Quantity')).toBeInTheDocument();
+    });
+
+    it('does not show quantity input in edit-queue-item mode', () => {
+      render(
+        <PrintModal
+          mode="edit-queue-item"
+          archiveId={1}
+          archiveName="Benchy"
+          queueItem={createMockQueueItem()}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      expect(screen.queryByLabelText('Quantity')).not.toBeInTheDocument();
+    });
+
+    it('defaults quantity to 1', () => {
+      render(
+        <PrintModal
+          mode="add-to-queue"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const input = screen.getByLabelText('Quantity') as HTMLInputElement;
+      expect(input.value).toBe('1');
+    });
+
+    it('quantity input has default value of 1 and accepts changes', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="reprint"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const input = screen.getByLabelText('Quantity') as HTMLInputElement;
+      expect(input.value).toBe('1');
+
+      await user.tripleClick(input);
+      await user.keyboard('5');
+      expect(input.value).toBe('5');
     });
   });
 });

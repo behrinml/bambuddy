@@ -480,6 +480,11 @@ function SortableQueueItem({
                 <ExternalLink className="w-3.5 h-3.5" />
               </Link>
             ) : null}
+            {item.batch_name && (
+              <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] sm:text-xs bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
+                {item.batch_name}
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-bambu-gray">

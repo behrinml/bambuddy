@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: 'Plate cleared — ready for next print',
     plateReady: 'Plate cleared — ready for next print',
     plateNumber: 'Plate {{index}}',
+    // Batch / quantity
+    quantity: 'Quantity',
+    quantityHint: 'Creates {{count}} queue items',
+    activeBatches: 'Active Batches',
+    batchProgress: '{{completed}} of {{total}} completed',
+    cancelBatch: 'Cancel Remaining',
+    batchCancelled: 'Remaining batch items cancelled',
+    cancelBatchConfirmTitle: 'Cancel Batch',
+    cancelBatchConfirmMessage: 'Cancel all remaining pending items in this batch?',
+    batch: 'Batch',
     // Sections
     sections: {
       currentlyPrinting: 'Currently Printing',

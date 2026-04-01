@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: 'Placa limpa — pronta para a próxima impressão',
     plateReady: 'Placa limpa — pronta para a próxima impressão',
     plateNumber: 'Placa {{index}}',
+    // Batch / quantity
+    quantity: 'Quantidade',
+    quantityHint: 'Cria {{count}} itens na fila',
+    activeBatches: 'Lotes ativos',
+    batchProgress: '{{completed}} de {{total}} concluídos',
+    cancelBatch: 'Cancelar restantes',
+    batchCancelled: 'Itens restantes do lote cancelados',
+    cancelBatchConfirmTitle: 'Cancelar lote',
+    cancelBatchConfirmMessage: 'Cancelar todos os itens pendentes restantes neste lote?',
+    batch: 'Lote',
     // Sections
     sections: {
       currentlyPrinting: 'Imprimindo Atualmente',

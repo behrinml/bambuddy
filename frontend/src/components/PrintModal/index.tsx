@@ -87,6 +87,9 @@ export function PrintModal({
   // Derived single-plate value for filament queries and single-select contexts
   const selectedPlate = selectedPlates.size === 1 ? [...selectedPlates][0] : null;
 
+  // Quantity — number of copies (creates a batch if > 1)
+  const [quantity, setQuantity] = useState(1);
+
   const [printOptions, setPrintOptions] = useState<PrintOptions>(() => {
     if (mode === 'edit-queue-item' && queueItem) {
       return {
@@ -686,7 +689,9 @@ export function PrintModal({
             await updateQueueMutation.mutateAsync(updateData);
           } else {
             // Add-to-queue mode with model-based assignment
-            await addToQueueMutation.mutateAsync(getQueueData(null, plateId));
+            const queueData = getQueueData(null, plateId);
+            if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
+            await addToQueueMutation.mutateAsync(queueData);
           }
           results.success++;
         } catch (error) {
@@ -735,6 +740,12 @@ export function PrintModal({
                   ...printOptions,
                 });
               }
+              // Queue remaining copies if quantity > 1
+              if (effectiveQuantity > 1) {
+                const queueData = getQueueData(printerId, plateId);
+                queueData.quantity = effectiveQuantity - 1;
+                await addToQueueMutation.mutateAsync(queueData);
+              }
             } else if (mode === 'edit-queue-item' && progressCounter === 1) {
               // Edit mode - update the original queue item for the first entry
               const printerMapping = getMappingForPrinter(printerId);
@@ -756,6 +767,7 @@ export function PrintModal({
             } else {
               // Add-to-queue mode, stagger-reprint mode, or edit mode with additional entries
               const queueData = getQueueData(printerId, plateId);
+              if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
               // Apply stagger offset for groups after the first
               if (useStagger) {
                 const groupIndex = Math.floor(i / scheduleOptions.staggerGroupSize);
@@ -825,18 +837,25 @@ export function PrintModal({
     return true;
   }, [selectedPrinters.length, assignmentMode, targetModel, mode, isMultiPlate, selectedPlates.size, isPending]);
 
+  // Quantity only applies for single-printer or model-based assignment (not multi-printer)
+  const effectiveQuantity = (assignmentMode === 'printer' && selectedPrinters.length > 1) ? 1 : quantity;
+
   // Modal title and action button text based on mode
   const getModalConfig = () => {
     const printerCount = selectedPrinters.length;
 
     if (mode === 'reprint') {
       const staggerReprint = willUseStagger && printerCount > 1;
+      let submitText = staggerReprint
+        ? t('printModal.staggerToPrinters', { count: printerCount, defaultValue: 'Stagger to {{count}} printers' })
+        : printerCount > 1 ? t('queue.printToPrinters', { count: printerCount }) : t('queue.print');
+      if (effectiveQuantity > 1) {
+        submitText = `${submitText} ×${effectiveQuantity}`;
+      }
       return {
         title: isLibraryFile ? t('queue.print') : t('queue.reprint'),
         icon: Printer,
-        submitText: staggerReprint
-          ? t('printModal.staggerToPrinters', { count: printerCount, defaultValue: 'Stagger to {{count}} printers' })
-          : printerCount > 1 ? t('queue.printToPrinters', { count: printerCount }) : t('queue.print'),
+        submitText,
         submitIcon: staggerReprint ? Calendar : Printer,
         loadingText: submitProgress.total > 1
           ? t('queue.sendingProgress', { current: submitProgress.current, total: submitProgress.total })
@@ -849,6 +868,9 @@ export function PrintModal({
         submitText = t('queue.queueSelectedPlates', { count: selectedPlates.size });
       } else if (printerCount > 1) {
         submitText = t('queue.queueToPrinters', { count: printerCount });
+      }
+      if (effectiveQuantity > 1) {
+        submitText = `${submitText} ×${effectiveQuantity}`;
       }
       return {
         title: t('queue.schedulePrint'),
@@ -1035,6 +1057,29 @@ export function PrintModal({
             {/* Print options */}
             {(mode === 'reprint' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
               <PrintOptionsPanel options={printOptions} onChange={setPrintOptions} defaultExpanded={!!initialSelectedPrinterIds?.length} />
+            )}
+
+            {/* Quantity — create multiple copies (batch). Hidden for multi-printer selection. */}
+            {mode !== 'edit-queue-item' && (assignmentMode === 'model' || selectedPrinters.length <= 1) && (
+              <div className="flex items-center gap-3">
+                <label htmlFor="printQuantity" className="text-sm text-bambu-gray whitespace-nowrap">
+                  {t('queue.quantity', 'Quantity')}
+                </label>
+                <input
+                  id="printQuantity"
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Math.min(999, parseInt(e.target.value) || 1)))}
+                  className="w-20 px-2 py-1 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
+                />
+                {quantity > 1 && (
+                  <span className="text-xs text-bambu-gray">
+                    {t('queue.quantityHint', 'Creates {{count}} queue items', { count: quantity })}
+                  </span>
+                )}
+              </div>
             )}
 
             {/* Stagger option for reprint mode with multiple printers */}

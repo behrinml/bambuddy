@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: '打印板已清理 — 准备进行下一个打印',
     plateReady: '打印板已清理 — 准备进行下一个打印',
     plateNumber: '板 {{index}}',
+    // Batch / quantity
+    quantity: '数量',
+    quantityHint: '创建 {{count}} 个队列项目',
+    activeBatches: '活跃批次',
+    batchProgress: '已完成 {{completed}}/{{total}}',
+    cancelBatch: '取消剩余',
+    batchCancelled: '已取消剩余批次项目',
+    cancelBatchConfirmTitle: '取消批次',
+    cancelBatchConfirmMessage: '取消此批次中所有剩余的待处理项目？',
+    batch: '批次',
     // Sections
     sections: {
       currentlyPrinting: '正在打印',

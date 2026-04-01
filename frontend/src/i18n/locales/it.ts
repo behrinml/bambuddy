@@ -856,6 +856,16 @@ export default {
     clearPlateSuccess: 'Piatto liberato — pronto per la prossima stampa',
     plateReady: 'Piatto liberato — pronto per la prossima stampa',
     plateNumber: 'Piatto {{index}}',
+    // Batch / quantity
+    quantity: 'Quantità',
+    quantityHint: 'Crea {{count}} elementi in coda',
+    activeBatches: 'Lotti attivi',
+    batchProgress: '{{completed}} di {{total}} completati',
+    cancelBatch: 'Annulla rimanenti',
+    batchCancelled: 'Elementi rimanenti del lotto annullati',
+    cancelBatchConfirmTitle: 'Annulla lotto',
+    cancelBatchConfirmMessage: 'Annullare tutti gli elementi in sospeso rimanenti in questo lotto?',
+    batch: 'Lotto',
     // Sections
     sections: {
       currentlyPrinting: 'In stampa',
