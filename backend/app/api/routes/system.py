@@ -80,6 +80,10 @@ def _is_under(path: Path, root: Path) -> bool:
 
 
 def _get_database_paths() -> list[Path]:
+    from backend.app.core.db_dialect import is_sqlite
+
+    if not is_sqlite():
+        return []  # PostgreSQL — no local DB files
     candidates = [settings.base_dir / "bambuddy.db", settings.base_dir / "bambutrack.db"]
     return [path for path in candidates if path.exists()]
 

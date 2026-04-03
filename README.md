@@ -423,7 +423,7 @@ Open **http://localhost:8000** in your browser.
 
 | Volume | Purpose |
 |--------|---------|
-| `bambuddy.db` | SQLite database with all your print data |
+| `bambuddy.db` | SQLite database with all your print data (not used with PostgreSQL) |
 | `archive/` | Archived 3MF files and thumbnails |
 | `logs/` | Application logs |
 
@@ -582,7 +582,7 @@ Full documentation available at **[wiki.bambuddy.cool](http://wiki.bambuddy.cool
 |-----------|------------|
 | Backend | Python, FastAPI, SQLAlchemy |
 | Frontend | React, TypeScript, Tailwind CSS |
-| Database | SQLite |
+| Database | SQLite (default) or PostgreSQL |
 | 3D Viewer | Three.js |
 | Communication | MQTT (TLS), FTPS |
 
