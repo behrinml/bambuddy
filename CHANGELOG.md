@@ -8,6 +8,7 @@ All notable changes to Bambuddy will be documented in this file.
 - **Optional PostgreSQL Database Support** — Bambuddy can now use an external PostgreSQL database instead of the built-in SQLite. Set the `DATABASE_URL` environment variable (e.g., `postgresql+asyncpg://user:pass@host:5432/bambuddy`) to connect to Postgres. SQLite remains the default when no `DATABASE_URL` is set. All features work with both backends including full-text archive search (FTS5 on SQLite, tsvector+GIN on PostgreSQL), backup/restore (file copy vs pg_dump/pg_restore), health diagnostics, and cross-database restore (import a SQLite backup into PostgreSQL with automatic type conversion and FK handling).
 
 ### Improved
+- **Database Engine Info on System Page** — The System Information page now shows the active database engine (SQLite or PostgreSQL) and its version in the Database section, making it easy to verify which backend is in use.
 - **REST Smart Plug: Separate Power/Energy URLs and Unit Multipliers** ([#472](https://github.com/maziggy/bambuddy/issues/472)) — REST/Webhook smart plugs can now use individual URLs for power and energy data instead of requiring all values in a single status response. Each value falls back to the shared Status URL when no separate URL is configured, so existing setups work without changes. Added power and energy multipliers for unit conversion (e.g., set energy multiplier to `0.001` to convert Wh to kWh). Useful for platforms like ioBroker that expose each data point as a separate API endpoint.
 
 ### Fixed

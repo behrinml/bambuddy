@@ -4473,6 +4473,8 @@ export interface SystemInfo {
     archive_dir: string;
   };
   database: {
+    engine: string;
+    version: string;
     archives: number;
     archives_completed: number;
     archives_failed: number;
