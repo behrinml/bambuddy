@@ -882,16 +882,17 @@ function ArchiveCard({
           <h3 className="min-w-0 font-medium text-white truncate">
             {archive.print_name || archive.filename}
           </h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="p-1 sm:p-1.5 shrink-0"
-            onClick={() => setShowEdit(true)}
-            disabled={!canModify('archives', 'update', archive.created_by_id)}
-            title={!canModify('archives', 'update', archive.created_by_id) ? t('archives.card.noPermissionEdit') : t('archives.card.edit')}
-          >
-            <Pencil className="w-3 h-3 sm:w-4 sm:h-4" />
-          </Button>
+          {canModify('archives', 'update', archive.created_by_id) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="p-1 sm:p-1.5 shrink-0"
+              onClick={() => setShowEdit(true)}
+              title={t('archives.card.edit')}
+            >
+              <Pencil className="w-3 h-3 sm:w-4 sm:h-4" />
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <p className="text-xs text-bambu-gray">{printerName}</p>
@@ -2035,15 +2036,16 @@ function ArchiveListRow({
           >
             <Download className="w-4 h-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowEdit(true)}
-            disabled={!canModify('archives', 'update', archive.created_by_id)}
-            title={!canModify('archives', 'update', archive.created_by_id) ? t('archives.card.noPermissionEdit') : t('archives.card.edit')}
-          >
-            <Pencil className="w-4 h-4" />
-          </Button>
+          {canModify('archives', 'update', archive.created_by_id) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowEdit(true)}
+              title={t('archives.card.edit')}
+            >
+              <Pencil className="w-4 h-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -3074,14 +3076,12 @@ export function ArchivesPage() {
               Select
             </Button>
           )}
-          <Button
-            onClick={() => setShowUpload(true)}
-            disabled={!hasPermission('archives:create')}
-            title={!hasPermission('archives:create') ? t('archives.permission.noCreate') : undefined}
-          >
-            <Upload className="w-4 h-4" />
-            Upload 3MF
-          </Button>
+          {hasPermission('archives:create') && (
+            <Button onClick={() => setShowUpload(true)}>
+              <Upload className="w-4 h-4" />
+              Upload 3MF
+            </Button>
+          )}
         </div>
       </div>
 

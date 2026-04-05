@@ -5,6 +5,7 @@ import { X, Save, Tag, Camera, Trash2, Loader2, Plus, FolderKanban, Hash, Link }
 import { api } from '../api/client';
 import type { Archive } from '../api/client';
 import { Button } from './Button';
+import { useAuth } from '../contexts/AuthContext';
 
 // Keys for failure reasons - translated at render time
 const FAILURE_REASON_KEYS = [
@@ -32,6 +33,7 @@ interface EditArchiveModalProps {
 
 export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditArchiveModalProps) {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
 
   // Close on Escape key
   useEffect(() => {
@@ -446,21 +448,23 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                 </div>
               ))}
               {/* Upload button */}
-              <label className="w-20 h-20 flex items-center justify-center border-2 border-dashed border-bambu-dark-tertiary rounded-lg cursor-pointer hover:border-bambu-green transition-colors">
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                  disabled={uploadingPhoto}
-                />
-                {uploadingPhoto ? (
-                  <Loader2 className="w-6 h-6 text-bambu-gray animate-spin" />
-                ) : (
-                  <Plus className="w-6 h-6 text-bambu-gray" />
-                )}
-              </label>
+              {hasPermission('archives:update_own') && (
+                <label className="w-20 h-20 flex items-center justify-center border-2 border-dashed border-bambu-dark-tertiary rounded-lg cursor-pointer hover:border-bambu-green transition-colors">
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                    disabled={uploadingPhoto}
+                  />
+                  {uploadingPhoto ? (
+                    <Loader2 className="w-6 h-6 text-bambu-gray animate-spin" />
+                  ) : (
+                    <Plus className="w-6 h-6 text-bambu-gray" />
+                  )}
+                </label>
+              )}
             </div>
             <p className="text-xs text-bambu-gray">{t('editArchive.photosHelp')}</p>
           </div>
