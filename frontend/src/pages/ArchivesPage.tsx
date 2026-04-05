@@ -363,20 +363,20 @@ function ArchiveCard({
     // For gcode files: show Print option
     // For source files: show Slice as the primary action
     ...(isGcodeFile ? [
-      {
+      ...(canModify('archives', 'reprint', archive.created_by_id) ? [{
         label: t('archives.menu.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
-        disabled: !archive.file_path || !canModify('archives', 'reprint', archive.created_by_id),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.permission.noReprint') : undefined,
-      },
-      {
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      }] : []),
+      ...(hasPermission('queue:create') ? [{
         label: t('archives.menu.schedule'),
         icon: <Calendar className="w-4 h-4" />,
         onClick: () => setShowSchedule(true),
-        disabled: !archive.file_path || !hasPermission('queue:create'),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : undefined,
-      },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      }] : []),
       {
         label: t('archives.menu.openInBambuStudio'),
         icon: <ExternalLink className="w-4 h-4" />,
@@ -418,30 +418,26 @@ function ArchiveCard({
       onClick: () => setShowTimelapse(true),
       disabled: !archive.timelapse_path,
     },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.scanForTimelapse'),
       icon: <ScanSearch className="w-4 h-4" />,
       onClick: () => timelapseScanMutation.mutate(),
-      disabled: !archive.printer_id || !!archive.timelapse_path || timelapseScanMutation.isPending || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
+      disabled: !archive.printer_id || !!archive.timelapse_path || timelapseScanMutation.isPending,
+    }] : []),
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.uploadTimelapse'),
       icon: <Upload className="w-4 h-4" />,
       onClick: () => timelapseInputRef.current?.click(),
-      disabled: !!archive.timelapse_path || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    ...(archive.timelapse_path ? [{
+      disabled: !!archive.timelapse_path,
+    }] : []),
+    ...(archive.timelapse_path && canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.removeTimelapse'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteTimelapseConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(archive.source_3mf_path || canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.source_3mf_path ? t('archives.menu.downloadSource3mf') : t('archives.menu.uploadSource3mf'),
       icon: <FileCode className="w-4 h-4" />,
       onClick: () => {
@@ -453,31 +449,23 @@ function ArchiveCard({
           source3mfInputRef.current?.click();
         }
       },
-      disabled: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id),
-      title: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUploadFiles') : undefined,
-    },
-    ...(archive.source_3mf_path ? [{
+    }] : []),
+    ...(archive.source_3mf_path && canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.replaceSource3mf'),
       icon: <Upload className="w-4 h-4" />,
       onClick: () => source3mfInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     },
     {
       label: t('archives.menu.removeSource3mf'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteSource3mfConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.f3d_path ? t('archives.menu.replaceF3d') : t('archives.menu.uploadF3d'),
       icon: <Box className="w-4 h-4" />,
       onClick: () => f3dInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
+    }] : []),
     ...(archive.f3d_path ? [{
       label: t('archives.menu.downloadF3d'),
       icon: <Download className="w-4 h-4" />,
@@ -487,14 +475,13 @@ function ArchiveCard({
         });
       },
     },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.removeF3d'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteF3dConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
+    ] : []),
     { label: '', divider: true, onClick: () => {} },
     {
       label: t('archives.menu.download'),
@@ -538,31 +525,25 @@ function ArchiveCard({
       onClick: () => setShowProjectPage(true),
     },
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites'),
       icon: <Star className={`w-4 h-4 ${archive.is_favorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />,
       onClick: () => favoriteMutation.mutate(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
+    }] : []),
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.edit'),
       icon: <Pencil className="w-4 h-4" />,
       onClick: () => setShowEdit(true),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
+    }] : []),
     ...(archive.project_id && archive.project_name ? [{
       label: t('archives.menu.goToProject', { name: archive.project_name }),
       icon: <FolderKanban className="w-4 h-4 text-bambu-green" />,
       onClick: () => window.location.href = '/projects',
     }] : []),
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.addToProject'),
       icon: <FolderKanban className="w-4 h-4" />,
       onClick: () => {},
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
       submenu: (() => {
         const items: ContextMenuItem[] = [];
 
@@ -607,21 +588,19 @@ function ArchiveCard({
 
         return items;
       })(),
-    },
+    }] : []),
     {
       label: isSelected ? t('archives.menu.deselect') : t('archives.menu.select'),
       icon: isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />,
       onClick: () => onSelect(archive.id),
     },
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(canModify('archives', 'delete', archive.created_by_id) ? [{
       label: t('archives.menu.delete'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'delete', archive.created_by_id),
-      title: !canModify('archives', 'delete', archive.created_by_id) ? t('archives.permission.noDelete') : undefined,
-    },
+    }] : []),
   ];
 
   return (
@@ -739,25 +718,20 @@ function ArchiveCard({
           <MoreVertical className="w-5 h-5 text-white" />
         </button>
         {/* Favorite star */}
-        <button
-          className={`absolute top-2 right-2 p-1 rounded transition-colors ${
-            canModify('archives', 'update', archive.created_by_id)
-              ? 'bg-black/50 hover:bg-black/70'
-              : 'bg-black/30 cursor-not-allowed'
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (canModify('archives', 'update', archive.created_by_id)) {
+        {canModify('archives', 'update', archive.created_by_id) && (
+          <button
+            className="absolute top-2 right-2 p-1 rounded transition-colors bg-black/50 hover:bg-black/70"
+            onClick={(e) => {
+              e.stopPropagation();
               favoriteMutation.mutate();
-            }
-          }}
-          disabled={!canModify('archives', 'update', archive.created_by_id)}
-          title={!canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : (archive.is_favorite ? t('archives.card.removeFromFavorites') : t('archives.card.addToFavorites'))}
-        >
-          <Star
-            className={`w-5 h-5 ${archive.is_favorite ? 'text-yellow-400 fill-yellow-400' : 'text-white'} ${!canModify('archives', 'update', archive.created_by_id) ? 'opacity-50' : ''}`}
-          />
-        </button>
+            }}
+            title={archive.is_favorite ? t('archives.card.removeFromFavorites') : t('archives.card.addToFavorites')}
+          >
+            <Star
+              className={`w-5 h-5 ${archive.is_favorite ? 'text-yellow-400 fill-yellow-400' : 'text-white'}`}
+            />
+          </button>
+        )}
         {(archive.status === 'failed' || archive.status === 'aborted') && (
           <div className="absolute top-2 left-12 px-2 py-1 rounded text-xs bg-status-error/80 text-white">
             {archive.status === 'aborted' ? t('archives.card.cancelled') : t('archives.card.failed')}
@@ -1064,28 +1038,32 @@ function ArchiveCard({
           {isSlicedFile(archive) ? (
             // Sliced file - can print directly
             <>
-              <Button
-                variant="primary"
-                size="sm"
-                className="flex-1 min-w-0 overflow-hidden"
-                onClick={() => setShowReprint(true)}
-                disabled={!archive.file_path || !canModify('archives', 'reprint', archive.created_by_id)}
-                title={!archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : undefined}
-              >
-                <Printer className="w-3 h-3 flex-shrink-0" />
-                <span className="hidden sm:inline truncate">{t('archives.card.reprint')}</span>
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="flex-1 min-w-0 overflow-hidden"
-                onClick={() => setShowSchedule(true)}
-                disabled={!archive.file_path || !hasPermission('queue:create')}
-                title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : t('archives.card.schedulePrint')}
-              >
-                <Calendar className="w-3 h-3 flex-shrink-0" />
-                <span className="hidden sm:inline truncate">{t('archives.card.schedule')}</span>
-              </Button>
+              {canModify('archives', 'reprint', archive.created_by_id) && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="flex-1 min-w-0 overflow-hidden"
+                  onClick={() => setShowReprint(true)}
+                  disabled={!archive.file_path}
+                  title={!archive.file_path ? t('archives.card.noFileForReprint') : undefined}
+                >
+                  <Printer className="w-3 h-3 flex-shrink-0" />
+                  <span className="hidden sm:inline truncate">{t('archives.card.reprint')}</span>
+                </Button>
+              )}
+              {hasPermission('queue:create') && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 min-w-0 overflow-hidden"
+                  onClick={() => setShowSchedule(true)}
+                  disabled={!archive.file_path}
+                  title={!archive.file_path ? t('archives.card.noFileForReprint') : t('archives.card.schedulePrint')}
+                >
+                  <Calendar className="w-3 h-3 flex-shrink-0" />
+                  <span className="hidden sm:inline truncate">{t('archives.card.schedule')}</span>
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -1147,16 +1125,17 @@ function ArchiveCard({
           >
             <Download className="w-3 h-3 sm:w-4 sm:h-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="min-w-0 p-1 sm:p-1.5"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={!canModify('archives', 'delete', archive.created_by_id)}
-            title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
-          >
-            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />
-          </Button>
+          {canModify('archives', 'delete', archive.created_by_id) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-w-0 p-1 sm:p-1.5"
+              onClick={() => setShowDeleteConfirm(true)}
+              title={t('archives.card.delete')}
+            >
+              <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />
+            </Button>
+          )}
         </div>
       </CardContent>
 
@@ -1615,20 +1594,20 @@ function ArchiveListRow({
 
   const contextMenuItems: ContextMenuItem[] = [
     ...(isGcodeFile ? [
-      {
+      ...(canModify('archives', 'reprint', archive.created_by_id) ? [{
         label: t('archives.menu.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
-        disabled: !archive.file_path || !canModify('archives', 'reprint', archive.created_by_id),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.permission.noReprint') : undefined,
-      },
-      {
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      }] : []),
+      ...(hasPermission('queue:create') ? [{
         label: t('archives.menu.schedule'),
         icon: <Calendar className="w-4 h-4" />,
         onClick: () => setShowSchedule(true),
-        disabled: !archive.file_path || !hasPermission('queue:create'),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : undefined,
-      },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      }] : []),
       {
         label: t('archives.menu.openInBambuStudio'),
         icon: <ExternalLink className="w-4 h-4" />,
@@ -1670,30 +1649,26 @@ function ArchiveListRow({
       onClick: () => setShowTimelapse(true),
       disabled: !archive.timelapse_path,
     },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.scanForTimelapse'),
       icon: <ScanSearch className="w-4 h-4" />,
       onClick: () => timelapseScanMutation.mutate(),
-      disabled: !archive.printer_id || !!archive.timelapse_path || timelapseScanMutation.isPending || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
+      disabled: !archive.printer_id || !!archive.timelapse_path || timelapseScanMutation.isPending,
+    }] : []),
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.uploadTimelapse'),
       icon: <Upload className="w-4 h-4" />,
       onClick: () => timelapseInputRef.current?.click(),
-      disabled: !!archive.timelapse_path || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    ...(archive.timelapse_path ? [{
+      disabled: !!archive.timelapse_path,
+    }] : []),
+    ...(archive.timelapse_path && canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.removeTimelapse'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteTimelapseConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(archive.source_3mf_path || canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.source_3mf_path ? t('archives.menu.downloadSource3mf') : t('archives.menu.uploadSource3mf'),
       icon: <FileCode className="w-4 h-4" />,
       onClick: () => {
@@ -1705,31 +1680,23 @@ function ArchiveListRow({
           source3mfInputRef.current?.click();
         }
       },
-      disabled: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id),
-      title: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUploadFiles') : undefined,
-    },
-    ...(archive.source_3mf_path ? [{
+    }] : []),
+    ...(archive.source_3mf_path && canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.replaceSource3mf'),
       icon: <Upload className="w-4 h-4" />,
       onClick: () => source3mfInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     },
     {
       label: t('archives.menu.removeSource3mf'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteSource3mfConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.f3d_path ? t('archives.menu.replaceF3d') : t('archives.menu.uploadF3d'),
       icon: <Box className="w-4 h-4" />,
       onClick: () => f3dInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
+    }] : []),
     ...(archive.f3d_path ? [{
       label: t('archives.menu.downloadF3d'),
       icon: <Download className="w-4 h-4" />,
@@ -1739,14 +1706,13 @@ function ArchiveListRow({
         });
       },
     },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.removeF3d'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteF3dConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
+    ] : []),
     { label: '', divider: true, onClick: () => {} },
     {
       label: t('archives.menu.download'),
@@ -1790,26 +1756,22 @@ function ArchiveListRow({
       onClick: () => setShowProjectPage(true),
     },
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: archive.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites'),
       icon: <Star className={`w-4 h-4 ${archive.is_favorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />,
       onClick: () => favoriteMutation.mutate(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
+    }] : []),
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.edit'),
       icon: <Pencil className="w-4 h-4" />,
       onClick: () => setShowEdit(true),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
+    }] : []),
     ...(archive.project_id && archive.project_name ? [{
       label: t('archives.menu.goToProject', { name: archive.project_name }),
       icon: <FolderKanban className="w-4 h-4 text-bambu-green" />,
       onClick: () => window.location.href = '/projects',
     }] : []),
-    {
+    ...(canModify('archives', 'update', archive.created_by_id) ? [{
       label: t('archives.menu.addToProject'),
       icon: <FolderKanban className="w-4 h-4" />,
       onClick: () => {},
@@ -1851,21 +1813,19 @@ function ArchiveListRow({
         }
         return items;
       })(),
-    },
+    }] : []),
     {
       label: isSelected ? t('archives.menu.deselect') : t('archives.menu.select'),
       icon: isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />,
       onClick: () => onSelect(archive.id),
     },
     { label: '', divider: true, onClick: () => {} },
-    {
+    ...(canModify('archives', 'delete', archive.created_by_id) ? [{
       label: t('archives.menu.delete'),
       icon: <Trash2 className="w-4 h-4" />,
       onClick: () => setShowDeleteConfirm(true),
       danger: true,
-      disabled: !canModify('archives', 'delete', archive.created_by_id),
-      title: !canModify('archives', 'delete', archive.created_by_id) ? t('archives.permission.noDelete') : undefined,
-    },
+    }] : []),
   ];
 
   return (
@@ -1991,13 +1951,12 @@ function ArchiveListRow({
           {formatFileSize(archive.file_size)}
         </div>
         <div className="col-span-2 flex justify-end gap-1">
-          {isSlicedFile(archive) && (
+          {isSlicedFile(archive) && canModify('archives', 'reprint', archive.created_by_id) && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowReprint(true)}
-              disabled={!canModify('archives', 'reprint', archive.created_by_id)}
-              title={!canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('archives.card.reprint')}
+              title={t('archives.card.reprint')}
               className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10"
             >
               <Play className="w-4 h-4" />
@@ -2046,15 +2005,16 @@ function ArchiveListRow({
               <Pencil className="w-4 h-4" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={!canModify('archives', 'delete', archive.created_by_id)}
-            title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
-          >
-            <Trash2 className="w-4 h-4 text-red-400" />
-          </Button>
+          {canModify('archives', 'delete', archive.created_by_id) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+              title={t('archives.card.delete')}
+            >
+              <Trash2 className="w-4 h-4 text-red-400" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
