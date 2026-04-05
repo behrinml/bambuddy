@@ -119,6 +119,7 @@ async def init_db():
         color_catalog,
         external_link,
         filament,
+        finance,
         github_backup,
         group,
         kprofile_note,
@@ -160,6 +161,9 @@ async def init_db():
 
     # Seed default groups and migrate existing users
     await seed_default_groups()
+
+    # Ensure finance defaults (wallet + private cost center) exist for all users
+    await seed_finance_defaults()
 
     # Seed default catalog entries
     await seed_spool_catalog()
@@ -1291,6 +1295,16 @@ async def run_migrations(conn):
     # Migration: Auto-print G-code injection (#422)
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN gcode_injection BOOLEAN DEFAULT FALSE NOT NULL")
 
+    # Migration: Add cost_center_id references for queue/archive accounting attribution
+    await _safe_execute(
+        conn,
+        "ALTER TABLE print_queue ADD COLUMN cost_center_id INTEGER REFERENCES cost_centers(id) ON DELETE SET NULL",
+    )
+    await _safe_execute(
+        conn,
+        "ALTER TABLE print_archives ADD COLUMN cost_center_id INTEGER REFERENCES cost_centers(id) ON DELETE SET NULL",
+    )
+
     # Migration: Add backup_spools and backup_archives columns to github_backup_config
     await _safe_execute(conn, "ALTER TABLE github_backup_config ADD COLUMN backup_spools BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE github_backup_config ADD COLUMN backup_archives BOOLEAN DEFAULT 0")
@@ -1486,8 +1500,6 @@ async def seed_default_groups():
                     if updated:
                         group.permissions = new_permissions
 
-        await session.commit()
-
         # Migrate new permissions: grant printers:clear_plate to all groups with printers:control
         result = await session.execute(select(Group))
         all_groups = result.scalars().all()
@@ -1526,6 +1538,67 @@ async def seed_default_groups():
                     user.groups.append(operators_group)
                     logger.info("Migrated user '%s' to Operators group", user.username)
 
+            await session.commit()
+
+
+async def seed_finance_defaults():
+    """Create default wallet and private cost center membership for each user."""
+    from sqlalchemy import select
+
+    from backend.app.models.finance import CostCenter, CostCenterMember, UserWallet
+    from backend.app.models.user import User
+
+    async with async_session() as session:
+        users = (await session.execute(select(User))).scalars().all()
+        if not users:
+            return
+
+        wallet_user_ids = set((await session.execute(select(UserWallet.user_id))).scalars().all())
+
+        existing_private = (
+            (
+                await session.execute(
+                    select(CostCenter).where(CostCenter.is_private.is_(True), CostCenter.owner_user_id.isnot(None))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        private_center_by_owner: dict[int, CostCenter] = {}
+        for center in existing_private:
+            if center.owner_user_id is not None and center.owner_user_id not in private_center_by_owner:
+                private_center_by_owner[center.owner_user_id] = center
+
+        existing_memberships = set(
+            (await session.execute(select(CostCenterMember.cost_center_id, CostCenterMember.user_id))).all()
+        )
+
+        changed = False
+        for user in users:
+            if user.id not in wallet_user_ids:
+                session.add(UserWallet(user_id=user.id, balance=0.0, currency="EUR"))
+                changed = True
+
+            center = private_center_by_owner.get(user.id)
+            if center is None:
+                center = CostCenter(
+                    name="Privat",
+                    is_active=True,
+                    is_private=True,
+                    owner_user_id=user.id,
+                )
+                session.add(center)
+                await session.flush()
+                private_center_by_owner[user.id] = center
+                changed = True
+
+            membership_key = (center.id, user.id)
+            if membership_key not in existing_memberships:
+                session.add(CostCenterMember(cost_center_id=center.id, user_id=user.id, can_print=True))
+                existing_memberships.add(membership_key)
+                changed = True
+
+        if changed:
             await session.commit()
 
 

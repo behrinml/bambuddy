@@ -122,6 +122,16 @@ class Permission(StrEnum):
     STATS_READ = "stats:read"
     STATS_FILTER_BY_USER = "stats:filter_by_user"
 
+    # Finance
+    FINANCE_READ_OWN = "finance:read_own"
+    FINANCE_READ_ALL = "finance:read_all"
+    FINANCE_TRANSACTIONS_CREATE = "finance:transactions:create"
+    FINANCE_COST_CENTERS_READ = "finance:cost_centers:read"
+    FINANCE_COST_CENTERS_CREATE = "finance:cost_centers:create"
+    FINANCE_COST_CENTERS_UPDATE = "finance:cost_centers:update"
+    FINANCE_COST_CENTERS_ASSIGN_USERS = "finance:cost_centers:assign_users"
+    FINANCE_BUDGETS_UPDATE = "finance:budgets:update"
+
     # System Info
     SYSTEM_READ = "system:read"
 
@@ -267,6 +277,16 @@ PERMISSION_CATEGORIES = {
         Permission.STATS_READ,
         Permission.STATS_FILTER_BY_USER,
     ],
+    "Finance": [
+        Permission.FINANCE_READ_OWN,
+        Permission.FINANCE_READ_ALL,
+        Permission.FINANCE_TRANSACTIONS_CREATE,
+        Permission.FINANCE_COST_CENTERS_READ,
+        Permission.FINANCE_COST_CENTERS_CREATE,
+        Permission.FINANCE_COST_CENTERS_UPDATE,
+        Permission.FINANCE_COST_CENTERS_ASSIGN_USERS,
+        Permission.FINANCE_BUDGETS_UPDATE,
+    ],
     "System": [
         Permission.SYSTEM_READ,
     ],
@@ -400,6 +420,9 @@ DEFAULT_GROUPS = {
             Permission.AMS_HISTORY_READ.value,
             Permission.STATS_READ.value,
             Permission.SYSTEM_READ.value,
+            # Finance - own visibility, shared cost center listing
+            Permission.FINANCE_READ_OWN.value,
+            Permission.FINANCE_COST_CENTERS_READ.value,
             # Settings - read only
             Permission.SETTINGS_READ.value,
             # WebSocket
@@ -430,6 +453,9 @@ DEFAULT_GROUPS = {
             Permission.AMS_HISTORY_READ.value,
             Permission.STATS_READ.value,
             Permission.SYSTEM_READ.value,
+            # Finance - own visibility, shared cost center listing
+            Permission.FINANCE_READ_OWN.value,
+            Permission.FINANCE_COST_CENTERS_READ.value,
             Permission.SETTINGS_READ.value,
             Permission.WEBSOCKET_CONNECT.value,
         ],

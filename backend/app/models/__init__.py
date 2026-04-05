@@ -4,6 +4,7 @@ from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.color_catalog import ColorCatalogEntry
 from backend.app.models.filament import Filament
+from backend.app.models.finance import CostCenter, CostCenterMember, UserWallet, WalletTransaction
 from backend.app.models.github_backup import GitHubBackupConfig, GitHubBackupLog
 from backend.app.models.group import Group, user_groups
 from backend.app.models.kprofile_note import KProfileNote
@@ -32,6 +33,10 @@ __all__ = [
     "Printer",
     "PrintArchive",
     "Filament",
+    "UserWallet",
+    "WalletTransaction",
+    "CostCenter",
+    "CostCenterMember",
     "Settings",
     "SmartPlug",
     "MaintenanceType",
