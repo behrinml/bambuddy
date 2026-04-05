@@ -1350,6 +1350,7 @@ export interface PrintQueueItem {
   // Either archive_id OR library_file_id must be set (archive created at print start)
   archive_id: number | null;
   library_file_id: number | null;
+  cost_center_id: number | null;
   position: number;
   scheduled_time: string | null;
   require_previous_success: boolean;
@@ -1413,6 +1414,7 @@ export interface PrintQueueItemCreate {
   filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
   archive_id?: number | null;
   library_file_id?: number | null;
+  cost_center_id?: number | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   auto_off_after?: boolean;
@@ -1434,6 +1436,7 @@ export interface PrintQueueItemCreate {
 
 export interface PrintQueueItemUpdate {
   printer_id?: number | null;  // null = unassign
+  cost_center_id?: number | null;
   target_model?: string | null;  // Target printer model (mutually exclusive with printer_id)
   target_location?: string | null;  // Target location filter (only used with target_model)
   filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
@@ -1458,6 +1461,7 @@ export interface PrintQueueItemUpdate {
 export interface PrintQueueBulkUpdate {
   item_ids: number[];
   printer_id?: number | null;
+  cost_center_id?: number | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   auto_off_after?: boolean;
@@ -4342,6 +4346,7 @@ export const api = {
     fileId: number,
     printerId: number,
     options?: {
+      cost_center_id?: number;
       plate_id?: number;
       plate_name?: string;
       ams_mapping?: number[];

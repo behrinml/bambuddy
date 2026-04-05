@@ -57,6 +57,7 @@ from backend.app.schemas.library import (
     ZipExtractResult,
 )
 from backend.app.services.archive import ThreeMFParser
+from backend.app.services.finance_access import resolve_print_cost_center_id
 from backend.app.services.stl_thumbnail import generate_stl_thumbnail
 from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
 
@@ -1653,7 +1654,7 @@ def is_sliced_file(filename: str) -> bool:
 async def add_files_to_queue(
     request: AddToQueueRequest,
     db: AsyncSession = Depends(get_db),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.QUEUE_CREATE)),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.QUEUE_CREATE)),
 ):
     """Add library files to the print queue.
 
@@ -1704,8 +1705,10 @@ async def add_files_to_queue(
             queue_item = PrintQueueItem(
                 printer_id=None,  # Unassigned
                 library_file_id=file_id,
+                cost_center_id=await resolve_print_cost_center_id(db, current_user, None),
                 position=max_position,
                 status="pending",
+                created_by_id=current_user.id if current_user else None,
             )
             db.add(queue_item)
 
@@ -2163,7 +2166,7 @@ async def print_library_file(
     printer_id: int,
     body: FilePrintRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.PRINTERS_CONTROL)),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.PRINTERS_CONTROL)),
 ):
     """Dispatch a library file for send/start on a printer.
 
@@ -2179,6 +2182,9 @@ async def print_library_file(
     # Use defaults if no body provided
     if body is None:
         body = FilePrintRequest()
+
+    resolved_cost_center_id = await resolve_print_cost_center_id(db, current_user, body.cost_center_id)
+    body.cost_center_id = resolved_cost_center_id
 
     # Get the library file
     result = await db.execute(select(LibraryFile).where(LibraryFile.id == file_id))
@@ -2225,8 +2231,8 @@ async def print_library_file(
             printer_id=printer_id,
             printer_name=printer.name,
             options=body.model_dump(exclude_none=True),
-            requested_by_user_id=None,
-            requested_by_username=None,
+            requested_by_user_id=current_user.id if current_user else None,
+            requested_by_username=current_user.username if current_user else None,
         )
     except DispatchEnqueueRejected as e:
         raise HTTPException(status_code=409, detail=str(e)) from e

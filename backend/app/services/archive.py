@@ -853,6 +853,7 @@ class ArchiveService:
         source_file: Path,
         print_data: dict | None = None,
         created_by_id: int | None = None,
+        cost_center_id: int | None = None,
         original_filename: str | None = None,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
@@ -862,6 +863,7 @@ class ArchiveService:
             source_file: Path to the 3MF file
             print_data: Print data from MQTT (optional)
             created_by_id: User ID who created this archive (optional, for user tracking)
+            cost_center_id: Cost center for finance attribution (optional)
             original_filename: Original human-readable filename (optional, for library files
                 stored with UUID names)
         """
@@ -974,6 +976,7 @@ class ArchiveService:
             quantity=quantity,
             extra_data=metadata,
             created_by_id=created_by_id,
+            cost_center_id=cost_center_id,
         )
 
         self.db.add(archive)

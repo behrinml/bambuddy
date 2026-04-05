@@ -722,6 +722,8 @@ class BackgroundDispatchService:
                 printer_id=job.printer_id,
                 source_file=file_path,
                 original_filename=lib_file.filename,
+                created_by_id=job.requested_by_user_id,
+                cost_center_id=job.options.get("cost_center_id"),
             )
             if not archive:
                 raise RuntimeError("Failed to create archive")

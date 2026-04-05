@@ -1617,6 +1617,7 @@ class PrintScheduler:
                     source_file=file_path,
                     original_filename=filename,
                     created_by_id=item.created_by_id,
+                    cost_center_id=item.cost_center_id,
                 )
                 if archive:
                     item.archive_id = archive.id

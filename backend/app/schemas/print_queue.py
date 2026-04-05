@@ -24,6 +24,7 @@ class PrintQueueItemCreate(BaseModel):
     # Either archive_id OR library_file_id must be provided
     archive_id: int | None = None
     library_file_id: int | None = None
+    cost_center_id: int | None = None
     scheduled_time: datetime | None = None  # None = ASAP (next when idle)
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
@@ -48,6 +49,7 @@ class PrintQueueItemCreate(BaseModel):
 
 class PrintQueueItemUpdate(BaseModel):
     printer_id: int | None = None
+    cost_center_id: int | None = None
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
     filament_overrides: list[dict] | None = None  # Filament overrides for model-based assignment
@@ -79,6 +81,7 @@ class PrintQueueItemResponse(BaseModel):
     waiting_reason: str | None = None  # Why a model-based job hasn't started yet
     archive_id: int | None  # None if library_file_id is set (archive created at print start)
     library_file_id: int | None  # For queue items from library files
+    cost_center_id: int | None = None
     position: int
     scheduled_time: UTCDatetime
     require_previous_success: bool
@@ -146,6 +149,7 @@ class PrintQueueBulkUpdate(BaseModel):
     item_ids: list[int]
     # Fields to update (all optional - only set fields are applied)
     printer_id: int | None = None
+    cost_center_id: int | None = None
     scheduled_time: datetime | None = None
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None

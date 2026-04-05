@@ -31,6 +31,7 @@ from backend.app.schemas.print_queue import (
     PrintQueueItemUpdate,
     PrintQueueReorder,
 )
+from backend.app.services.finance_access import resolve_print_cost_center_id
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
@@ -190,6 +191,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "waiting_reason": item.waiting_reason,
         "archive_id": item.archive_id,
         "library_file_id": item.library_file_id,
+        "cost_center_id": item.cost_center_id,
         "position": item.position,
         "scheduled_time": item.scheduled_time,
         "require_previous_success": item.require_previous_success,
@@ -353,6 +355,8 @@ async def add_to_queue(
     if not data.archive_id and not data.library_file_id:
         raise HTTPException(400, "Either archive_id or library_file_id must be provided")
 
+    resolved_cost_center_id = await resolve_print_cost_center_id(db, current_user, data.cost_center_id)
+
     # Cannot specify both printer_id and target_model
     if data.printer_id and target_model_norm:
         raise HTTPException(400, "Cannot specify both printer_id and target_model")
@@ -495,6 +499,7 @@ async def add_to_queue(
             filament_overrides=filament_overrides_json,
             archive_id=data.archive_id,
             library_file_id=data.library_file_id,
+            cost_center_id=resolved_cost_center_id,
             scheduled_time=data.scheduled_time,
             require_previous_success=data.require_previous_success,
             auto_off_after=data.auto_off_after,
@@ -601,6 +606,10 @@ async def bulk_update_queue_items(
         result = await db.execute(select(Printer).where(Printer.id == update_data["printer_id"]))
         if not result.scalar_one_or_none():
             raise HTTPException(400, "Printer not found")
+
+    # Validate/resolve cost center if being changed
+    if "cost_center_id" in update_data:
+        update_data["cost_center_id"] = await resolve_print_cost_center_id(db, user, update_data["cost_center_id"])
 
     # Fetch all items
     result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(data.item_ids)))
@@ -807,6 +816,10 @@ async def update_queue_item(
         result = await db.execute(select(Printer).where(Printer.id == update_data["printer_id"]))
         if not result.scalar_one_or_none():
             raise HTTPException(400, "Printer not found")
+
+    # Validate/resolve cost center if being changed
+    if "cost_center_id" in update_data:
+        update_data["cost_center_id"] = await resolve_print_cost_center_id(db, user, update_data["cost_center_id"])
 
     # Validate target_model has active printers
     if "target_model" in update_data and update_data["target_model"]:

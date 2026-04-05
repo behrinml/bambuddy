@@ -199,6 +199,7 @@ class FilePrintRequest(BaseModel):
     """
 
     # Print options (same as archive reprint)
+    cost_center_id: int | None = None
     plate_id: int | None = None
     plate_name: str | None = None
     ams_mapping: list[int] | None = None
