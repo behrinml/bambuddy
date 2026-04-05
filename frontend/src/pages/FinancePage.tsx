@@ -35,6 +35,7 @@ export function FinancePage() {
   const canReadCostCenters = hasPermission('finance:cost_centers:read');
   const canCreateCostCenters = hasPermission('finance:cost_centers:create');
   const canUpdateBudgets = hasPermission('finance:budgets:update');
+  const canAssignCostCenterUsers = hasPermission('finance:cost_centers:assign_users');
   const canAdjustWallet = hasPermission('finance:transactions:create');
   const canReadUsers = hasPermission('users:read');
 
@@ -49,6 +50,10 @@ export function FinancePage() {
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentDescription, setAdjustmentDescription] = useState('');
   const [adjustmentCostCenterId, setAdjustmentCostCenterId] = useState<number | null>(null);
+
+  const [selectedManageCenterId, setSelectedManageCenterId] = useState<number | null>(null);
+  const [memberUserId, setMemberUserId] = useState<number | null>(null);
+  const [memberCanPrint, setMemberCanPrint] = useState(true);
 
   const [budgetDrafts, setBudgetDrafts] = useState<Record<number, { total: string; monthly: string }>>({});
 
@@ -73,7 +78,13 @@ export function FinancePage() {
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: api.getUsers,
-    enabled: canAdjustWallet && canReadUsers,
+    enabled: (canAdjustWallet || canAssignCostCenterUsers) && canReadUsers,
+  });
+
+  const { data: selectedCenterDetail } = useQuery({
+    queryKey: ['finance', 'cost-center', selectedManageCenterId],
+    queryFn: () => api.getCostCenter(selectedManageCenterId!),
+    enabled: canAssignCostCenterUsers && selectedManageCenterId != null,
   });
 
   useEffect(() => {
@@ -93,6 +104,24 @@ export function FinancePage() {
     if (selectedUserId != null && users.some((u) => u.id === selectedUserId)) return;
     setSelectedUserId(users[0].id);
   }, [users, selectedUserId]);
+
+  useEffect(() => {
+    if (!canAssignCostCenterUsers) return;
+    const sharedCenters = (costCenters || []).filter((c) => !c.is_private);
+    if (sharedCenters.length === 0) {
+      setSelectedManageCenterId(null);
+      return;
+    }
+    if (selectedManageCenterId != null && sharedCenters.some((c) => c.id === selectedManageCenterId)) return;
+    setSelectedManageCenterId(sharedCenters[0].id);
+  }, [canAssignCostCenterUsers, costCenters, selectedManageCenterId]);
+
+  useEffect(() => {
+    if (!canAssignCostCenterUsers || !users || users.length === 0) return;
+    const existingMemberIds = new Set((selectedCenterDetail?.members || []).map((m) => m.user_id));
+    const firstAvailable = users.find((u) => !existingMemberIds.has(u.id));
+    setMemberUserId(firstAvailable ? firstAvailable.id : null);
+  }, [canAssignCostCenterUsers, users, selectedCenterDetail]);
 
   const createCostCenterMutation = useMutation({
     mutationFn: () =>
@@ -145,6 +174,33 @@ export function FinancePage() {
         description: payload.description,
         cost_center_id: payload.costCenterId ?? null,
       }),
+  });
+
+  const upsertMemberMutation = useMutation({
+    mutationFn: (payload: { costCenterId: number; userId: number; canPrint: boolean }) =>
+      api.upsertCostCenterMember(payload.costCenterId, {
+        user_id: payload.userId,
+        can_print: payload.canPrint,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      showToast(t('finance.memberSaved', 'Member saved'));
+    },
+    onError: (error: Error) => {
+      showToast(error.message || t('finance.memberSaveFailed', 'Failed to save member'), 'error');
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (payload: { costCenterId: number; userId: number }) =>
+      api.removeCostCenterMember(payload.costCenterId, payload.userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      showToast(t('finance.memberRemoved', 'Member removed'));
+    },
+    onError: (error: Error) => {
+      showToast(error.message || t('finance.memberRemoveFailed', 'Failed to remove member'), 'error');
+    },
   });
 
   const isAdjustingWallet = depositMutation.isPending || withdrawMutation.isPending;
@@ -201,12 +257,38 @@ export function FinancePage() {
     }
   };
 
+  const handleAddMember = () => {
+    if (selectedManageCenterId == null) {
+      showToast(t('finance.selectCostCenter', 'Please select a cost center'), 'error');
+      return;
+    }
+    if (memberUserId == null) {
+      showToast(t('finance.noEligibleUsers', 'No eligible users available'), 'error');
+      return;
+    }
+    upsertMemberMutation.mutate({
+      costCenterId: selectedManageCenterId,
+      userId: memberUserId,
+      canPrint: memberCanPrint,
+    });
+  };
+
+  const handleRemoveMember = (userId: number) => {
+    if (selectedManageCenterId == null) return;
+    removeMemberMutation.mutate({ costCenterId: selectedManageCenterId, userId });
+  };
+
   const currency = wallet?.currency || 'EUR';
   const currencySymbol = getCurrencySymbol(currency);
 
   const sortedUsers = useMemo(() => {
     return [...(users || [])].sort((a, b) => a.username.localeCompare(b.username));
   }, [users]);
+
+  const availableUsersForCenter = useMemo(() => {
+    const existingIds = new Set((selectedCenterDetail?.members || []).map((m) => m.user_id));
+    return sortedUsers.filter((u) => !existingIds.has(u.id));
+  }, [sortedUsers, selectedCenterDetail]);
 
   if (!canAccessFinance) {
     return (
@@ -366,6 +448,97 @@ export function FinancePage() {
             <Button onClick={handleWalletAdjustment} disabled={isAdjustingWallet}>
               {isAdjustingWallet ? t('common.saving', 'Saving...') : t('finance.applyAdjustment', 'Apply adjustment')}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canAssignCostCenterUsers && canReadUsers && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-white">{t('finance.manageMembers', 'Manage cost center members')}</h2>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <select
+                value={selectedManageCenterId ?? ''}
+                onChange={(e) => setSelectedManageCenterId(e.target.value ? Number(e.target.value) : null)}
+                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
+              >
+                {(costCenters || [])
+                  .filter((center) => !center.is_private)
+                  .map((center) => (
+                    <option key={center.id} value={center.id}>{center.name}</option>
+                  ))}
+              </select>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="memberCanPrint"
+                  type="checkbox"
+                  checked={memberCanPrint}
+                  onChange={(e) => setMemberCanPrint(e.target.checked)}
+                  className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
+                />
+                <label htmlFor="memberCanPrint" className="text-sm text-bambu-gray">
+                  {t('finance.memberCanPrint', 'Member can print')}
+                </label>
+              </div>
+
+              <select
+                value={memberUserId ?? ''}
+                onChange={(e) => setMemberUserId(e.target.value ? Number(e.target.value) : null)}
+                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
+              >
+                <option value="">{t('finance.selectUser', 'Select user')}</option>
+                {availableUsersForCenter.map((u) => (
+                  <option key={u.id} value={u.id}>{u.username}</option>
+                ))}
+              </select>
+
+              <Button onClick={handleAddMember} disabled={upsertMemberMutation.isPending || memberUserId == null}>
+                {upsertMemberMutation.isPending ? t('common.saving', 'Saving...') : t('finance.addMember', 'Add member')}
+              </Button>
+            </div>
+
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-bambu-dark-tertiary text-bambu-gray">
+                    <th className="text-left py-2 pr-3">{t('common.name', 'Name')}</th>
+                    <th className="text-left py-2 pr-3">{t('finance.canPrint', 'Can print')}</th>
+                    <th className="text-left py-2">{t('common.actions', 'Actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedCenterDetail?.members || []).map((member) => {
+                    const user = sortedUsers.find((u) => u.id === member.user_id);
+                    return (
+                      <tr key={member.id} className="border-b border-bambu-dark-tertiary/60 text-white">
+                        <td className="py-2 pr-3">{user?.username || `User ${member.user_id}`}</td>
+                        <td className="py-2 pr-3">{member.can_print ? t('common.yes', 'Yes') : t('common.no', 'No')}</td>
+                        <td className="py-2">
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => handleRemoveMember(member.user_id)}
+                            disabled={removeMemberMutation.isPending}
+                          >
+                            {t('common.remove', 'Remove')}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {(selectedCenterDetail?.members || []).length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-3 text-bambu-gray">
+                        {t('finance.noMembers', 'No members assigned.')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -2194,6 +2194,23 @@ export interface CostCenterBudgetUpdateRequest {
   monthly_budget?: number | null;
 }
 
+export interface CostCenterMemberRequest {
+  user_id: number;
+  can_print?: boolean;
+}
+
+export interface CostCenterMemberResponse {
+  id: number;
+  cost_center_id: number;
+  user_id: number;
+  can_print: boolean;
+  created_at: string;
+}
+
+export interface CostCenterDetail extends CostCenterSummary {
+  members: CostCenterMemberResponse[];
+}
+
 export interface WalletBalance {
   user_id: number;
   balance: number;
@@ -3588,6 +3605,17 @@ export const api = {
     request<CostCenterSummary>(`/finance/cost-centers/${costCenterId}/budgets`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    }),
+  getCostCenter: (costCenterId: number) =>
+    request<CostCenterDetail>(`/finance/cost-centers/${costCenterId}`),
+  upsertCostCenterMember: (costCenterId: number, data: CostCenterMemberRequest) =>
+    request<CostCenterMemberResponse>(`/finance/cost-centers/${costCenterId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  removeCostCenterMember: (costCenterId: number, userId: number) =>
+    request<{ status: string }>(`/finance/cost-centers/${costCenterId}/members/${userId}`, {
+      method: 'DELETE',
     }),
   depositUserBalance: (userId: number, data: WalletAdjustmentRequest) =>
     request<WalletAdjustmentResponse>(`/finance/users/${userId}/deposit`, {
