@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WalletBalanceResponse(BaseModel):
@@ -39,3 +39,51 @@ class CostCenterSummaryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class WalletAdjustmentRequest(BaseModel):
+    amount: float = Field(..., gt=0)
+    description: str | None = None
+    cost_center_id: int | None = None
+
+
+class WalletAdjustmentResponse(BaseModel):
+    transaction: WalletTransactionResponse
+    balance: WalletBalanceResponse
+
+
+class CostCenterCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    total_budget: float | None = None
+    monthly_budget: float | None = None
+    is_active: bool = True
+
+
+class CostCenterUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    is_active: bool | None = None
+
+
+class CostCenterBudgetUpdateRequest(BaseModel):
+    total_budget: float | None = None
+    monthly_budget: float | None = None
+
+
+class CostCenterMemberRequest(BaseModel):
+    user_id: int
+    can_print: bool = True
+
+
+class CostCenterMemberResponse(BaseModel):
+    id: int
+    cost_center_id: int
+    user_id: int
+    can_print: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CostCenterDetailResponse(CostCenterSummaryResponse):
+    members: list[CostCenterMemberResponse] = []
