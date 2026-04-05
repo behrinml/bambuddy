@@ -2182,6 +2182,18 @@ export interface CostCenterSummary {
   can_print: boolean;
 }
 
+export interface CostCenterCreateRequest {
+  name: string;
+  total_budget?: number | null;
+  monthly_budget?: number | null;
+  is_active?: boolean;
+}
+
+export interface CostCenterBudgetUpdateRequest {
+  total_budget?: number | null;
+  monthly_budget?: number | null;
+}
+
 export interface WalletBalance {
   user_id: number;
   balance: number;
@@ -2201,6 +2213,17 @@ export interface WalletTransaction {
   print_archive_id: number | null;
   print_queue_id: number | null;
   created_at: string;
+}
+
+export interface WalletAdjustmentRequest {
+  amount: number;
+  description?: string;
+  cost_center_id?: number | null;
+}
+
+export interface WalletAdjustmentResponse {
+  transaction: WalletTransaction;
+  balance: WalletBalance;
 }
 
 // Permission type - all available permissions
@@ -3554,6 +3577,28 @@ export const api = {
   getMyTransactions: (limit = 50, offset = 0) =>
     request<WalletTransaction[]>(`/finance/me/transactions?limit=${limit}&offset=${offset}`),
   getMyCostCenters: () => request<CostCenterSummary[]>('/finance/cost-centers/mine'),
+  listCostCenters: (includeInactive = false) =>
+    request<CostCenterSummary[]>(`/finance/cost-centers?include_inactive=${includeInactive ? 'true' : 'false'}`),
+  createCostCenter: (data: CostCenterCreateRequest) =>
+    request<CostCenterSummary>('/finance/cost-centers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCostCenterBudgets: (costCenterId: number, data: CostCenterBudgetUpdateRequest) =>
+    request<CostCenterSummary>(`/finance/cost-centers/${costCenterId}/budgets`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  depositUserBalance: (userId: number, data: WalletAdjustmentRequest) =>
+    request<WalletAdjustmentResponse>(`/finance/users/${userId}/deposit`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  withdrawUserBalance: (userId: number, data: WalletAdjustmentRequest) =>
+    request<WalletAdjustmentResponse>(`/finance/users/${userId}/withdraw`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   // K-Profiles
   getKProfiles: (printerId: number, nozzleDiameter = '0.4') =>
