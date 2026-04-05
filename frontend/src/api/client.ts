@@ -2170,6 +2170,39 @@ export interface ExternalLinkUpdate {
   open_in_new_tab?: boolean;
 }
 
+// Finance types
+export interface CostCenterSummary {
+  id: number;
+  name: string;
+  is_private: boolean;
+  owner_user_id: number | null;
+  is_active: boolean;
+  total_budget: number | null;
+  monthly_budget: number | null;
+  can_print: boolean;
+}
+
+export interface WalletBalance {
+  user_id: number;
+  balance: number;
+  currency: string;
+  updated_at: string | null;
+}
+
+export interface WalletTransaction {
+  id: number;
+  user_id: number;
+  cost_center_id: number | null;
+  transaction_type: string;
+  amount: number;
+  balance_after: number | null;
+  description: string | null;
+  created_by_user_id: number | null;
+  print_archive_id: number | null;
+  print_queue_id: number | null;
+  created_at: string;
+}
+
 // Permission type - all available permissions
 export type Permission =
   | 'printers:read' | 'printers:create' | 'printers:update' | 'printers:delete' | 'printers:control' | 'printers:files' | 'printers:ams_rfid' | 'printers:clear_plate'
@@ -2194,6 +2227,9 @@ export type Permission =
   | 'discovery:scan'
   | 'firmware:read' | 'firmware:update'
   | 'ams_history:read'
+  | 'finance:read_own' | 'finance:read_all' | 'finance:transactions:create'
+  | 'finance:cost_centers:read' | 'finance:cost_centers:create' | 'finance:cost_centers:update' | 'finance:cost_centers:assign_users'
+  | 'finance:budgets:update'
   | 'stats:read' | 'stats:filter_by_user'
   | 'system:read'
   | 'settings:read' | 'settings:update' | 'settings:backup' | 'settings:restore'
@@ -3205,6 +3241,7 @@ export const api = {
     archiveId: number,
     printerId: number,
     options?: {
+      cost_center_id?: number;
       plate_id?: number;
       plate_name?: string;
       ams_mapping?: number[];
@@ -3511,6 +3548,12 @@ export const api = {
   getBatch: (id: number) => request<PrintBatch>(`/queue/batches/${id}`),
   cancelBatch: (id: number) =>
     request<{ message: string }>(`/queue/batches/${id}`, { method: 'DELETE' }),
+
+  // Finance
+  getMyBalance: () => request<WalletBalance>('/finance/me/balance'),
+  getMyTransactions: (limit = 50, offset = 0) =>
+    request<WalletTransaction[]>(`/finance/me/transactions?limit=${limit}&offset=${offset}`),
+  getMyCostCenters: () => request<CostCenterSummary[]>('/finance/cost-centers/mine'),
 
   // K-Profiles
   getKProfiles: (printerId: number, nozzleDiameter = '0.4') =>

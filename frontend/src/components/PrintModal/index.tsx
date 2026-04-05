@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Calendar, Code, Layers, Loader2, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
+import type { CostCenterSummary, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -17,6 +17,7 @@ import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
 import { getGlobalTrayId, isPlaceholderDate } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
+import { CostCenterSelect } from './CostCenterSelect';
 import { PlateSelector } from './PlateSelector';
 import { PrinterSelector } from './PrinterSelector';
 import { PrintOptionsPanel } from './PrintOptions';
@@ -52,7 +53,7 @@ export function PrintModal({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
 
   // Determine if we're printing a library file
   const isLibraryFile = !!libraryFileId && !archiveId;
@@ -175,6 +176,14 @@ export function PrintModal({
     return null;
   });
 
+  // Cost center selection (defaults to queue item's value in edit mode)
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<number | null>(() => {
+    if (mode === 'edit-queue-item' && queueItem?.cost_center_id != null) {
+      return queueItem.cost_center_id;
+    }
+    return null;
+  });
+
   // Filament overrides for model-based assignment: slot_id -> {type, color}
   const [filamentOverrides, setFilamentOverrides] = useState<Record<number, { type: string; color: string }>>(() => {
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
@@ -257,6 +266,28 @@ export function PrintModal({
     queryKey: ['printers'],
     queryFn: api.getPrinters,
   });
+
+  const canReadCostCenters = hasPermission('finance:cost_centers:read');
+  const { data: myCostCenters } = useQuery({
+    queryKey: ['finance', 'cost-centers', 'mine'],
+    queryFn: api.getMyCostCenters,
+    enabled: !!user && canReadCostCenters,
+  });
+
+  const printableCostCenters = useMemo(
+    () => (myCostCenters || []).filter((center: CostCenterSummary) => center.can_print && center.is_active),
+    [myCostCenters]
+  );
+
+  // Select default cost center once loaded (prefer private/personal)
+  useEffect(() => {
+    if (!canReadCostCenters) return;
+    if (printableCostCenters.length === 0) return;
+    if (selectedCostCenterId != null && printableCostCenters.some((c) => c.id === selectedCostCenterId)) return;
+
+    const preferredPrivate = printableCostCenters.find((c) => c.is_private);
+    setSelectedCostCenterId(preferredPrivate ? preferredPrivate.id : printableCostCenters[0].id);
+  }, [canReadCostCenters, printableCostCenters, selectedCostCenterId]);
 
   const { data: spoolAssignments } = useQuery({
     queryKey: ['spool-assignments'],
@@ -641,6 +672,7 @@ export function PrintModal({
       target_model: assignmentMode === 'model' ? targetModel : null,
       target_location: assignmentMode === 'model' ? targetLocation : null,
       filament_overrides: assignmentMode === 'model' ? filamentOverridesArray : undefined,
+      cost_center_id: selectedCostCenterId,
       // Use library_file_id for library files, archive_id for archives
       archive_id: isLibraryFile ? undefined : archiveId,
       library_file_id: isLibraryFile ? libraryFileId : undefined,
@@ -675,6 +707,7 @@ export function PrintModal({
             // Edit mode - update with target_model (only for single plate)
             const updateData: PrintQueueItemUpdate = {
               printer_id: null,
+                cost_center_id: selectedCostCenterId,
               target_model: targetModel,
               target_location: targetLocation,
               filament_overrides: filamentOverridesArray || null,
@@ -730,6 +763,7 @@ export function PrintModal({
               const printerMapping = getMappingForPrinter(printerId);
               if (isLibraryFile) {
                 await api.printLibraryFile(libraryFileId!, printerId, {
+                  cost_center_id: selectedCostCenterId ?? undefined,
                   plate_id: selectedPlate ?? undefined,
                   plate_name: selectedPlateName,
                   ams_mapping: printerMapping,
@@ -737,6 +771,7 @@ export function PrintModal({
                 });
               } else {
                 await api.reprintArchive(archiveId!, printerId, {
+                  cost_center_id: selectedCostCenterId ?? undefined,
                   plate_id: selectedPlate ?? undefined,
                   plate_name: selectedPlateName,
                   ams_mapping: printerMapping,
@@ -754,6 +789,7 @@ export function PrintModal({
               const printerMapping = getMappingForPrinter(printerId);
               const updateData: PrintQueueItemUpdate = {
                 printer_id: printerId,
+                cost_center_id: selectedCostCenterId,
                 target_model: null,
                 target_location: null,
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
@@ -1061,6 +1097,14 @@ export function PrintModal({
             {/* Print options */}
             {(mode === 'reprint' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
               <PrintOptionsPanel options={printOptions} onChange={setPrintOptions} defaultExpanded={!!initialSelectedPrinterIds?.length} />
+            )}
+
+            {canReadCostCenters && (
+              <CostCenterSelect
+                costCenters={printableCostCenters}
+                selectedCostCenterId={selectedCostCenterId}
+                onChange={setSelectedCostCenterId}
+              />
             )}
 
             {/* Quantity — create multiple copies (batch). Hidden for multi-printer selection. */}

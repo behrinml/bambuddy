@@ -10,6 +10,7 @@ export default {
     projects: 'Projects',
     inventory: 'Filament',
     files: 'File Manager',
+    finance: 'Finance',
     notifications: 'Notifications',
     settings: 'Settings',
     system: 'System',
