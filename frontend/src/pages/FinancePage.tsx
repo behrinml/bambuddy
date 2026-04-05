@@ -31,7 +31,6 @@ export function FinancePage() {
   const queryClient = useQueryClient();
 
   const canReadOwn = hasPermission('finance:read_own');
-  const canReadAll = hasPermission('finance:read_all');
   const canReadCostCenters = hasPermission('finance:cost_centers:read');
   const canCreateCostCenters = hasPermission('finance:cost_centers:create');
   const canUpdateBudgets = hasPermission('finance:budgets:update');
@@ -55,6 +54,11 @@ export function FinancePage() {
   const [memberUserId, setMemberUserId] = useState<number | null>(null);
   const [memberCanPrint, setMemberCanPrint] = useState(true);
 
+  const [txOffset, setTxOffset] = useState(0);
+  const txLimit = 50;
+  const [txTypeFilter, setTxTypeFilter] = useState<string>('all');
+  const [txCostCenterFilter, setTxCostCenterFilter] = useState<number | 'all'>('all');
+
   const [budgetDrafts, setBudgetDrafts] = useState<Record<number, { total: string; monthly: string }>>({});
 
   const { data: wallet, isLoading: walletLoading } = useQuery({
@@ -64,8 +68,8 @@ export function FinancePage() {
   });
 
   const { data: transactions, isLoading: txLoading } = useQuery({
-    queryKey: ['finance', 'me', 'transactions'],
-    queryFn: () => api.getMyTransactions(100, 0),
+    queryKey: ['finance', 'me', 'transactions', txLimit, txOffset],
+    queryFn: () => api.getMyTransactions(txLimit, txOffset),
     enabled: canReadOwn,
   });
 
@@ -290,6 +294,15 @@ export function FinancePage() {
     return sortedUsers.filter((u) => !existingIds.has(u.id));
   }, [sortedUsers, selectedCenterDetail]);
 
+  const filteredTransactions = useMemo(() => {
+    const items = transactions || [];
+    return items.filter((tx) => {
+      if (txTypeFilter !== 'all' && tx.transaction_type !== txTypeFilter) return false;
+      if (txCostCenterFilter !== 'all' && tx.cost_center_id !== txCostCenterFilter) return false;
+      return true;
+    });
+  }, [transactions, txTypeFilter, txCostCenterFilter]);
+
   if (!canAccessFinance) {
     return (
       <div className="space-y-6">
@@ -335,7 +348,7 @@ export function FinancePage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold text-white">{txLoading ? '-' : transactions?.length ?? 0}</p>
-            <p className="text-xs text-bambu-gray mt-2">{t('finance.last100', 'Last 100 entries')}</p>
+            <p className="text-xs text-bambu-gray mt-2">{t('finance.pageSize', 'Showing up to {{count}} entries per page', { count: txLimit })}</p>
           </CardContent>
         </Card>
 
@@ -627,17 +640,66 @@ export function FinancePage() {
         </Card>
       )}
 
-      {(canReadOwn || canReadAll) && (
+      {canReadOwn && (
         <Card>
           <CardHeader>
             <h2 className="text-lg font-semibold text-white">{t('finance.recentTransactions', 'Recent transactions')}</h2>
           </CardHeader>
           <CardContent className="space-y-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <select
+                value={txTypeFilter}
+                onChange={(e) => setTxTypeFilter(e.target.value)}
+                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
+              >
+                <option value="all">{t('finance.allTypes', 'All types')}</option>
+                <option value="deposit">{t('finance.deposit', 'Deposit')}</option>
+                <option value="withdraw">{t('finance.withdraw', 'Withdraw')}</option>
+              </select>
+
+              <select
+                value={txCostCenterFilter}
+                onChange={(e) => setTxCostCenterFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
+              >
+                <option value="all">{t('finance.allCostCenters', 'All cost centers')}</option>
+                {(costCenters || []).map((center) => (
+                  <option key={center.id} value={center.id}>{center.name}</option>
+                ))}
+              </select>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setTxOffset((prev) => Math.max(0, prev - txLimit))}
+                  disabled={txOffset === 0 || txLoading}
+                >
+                  {t('finance.prev', 'Previous')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setTxOffset((prev) => prev + txLimit)}
+                  disabled={txLoading || (transactions?.length ?? 0) < txLimit}
+                >
+                  {t('finance.next', 'Next')}
+                </Button>
+              </div>
+            </div>
+
+            <p className="text-xs text-bambu-gray">
+              {t('finance.pageRange', 'Offset {{offset}}', { offset: txOffset })}
+            </p>
+
             {txLoading && <p className="text-sm text-bambu-gray">{t('common.loading', 'Loading...')}</p>}
             {!txLoading && (!transactions || transactions.length === 0) && (
               <p className="text-sm text-bambu-gray">{t('finance.noTransactions', 'No transactions available.')}</p>
             )}
-            {!txLoading && transactions && transactions.length > 0 && (
+            {!txLoading && transactions && transactions.length > 0 && filteredTransactions.length === 0 && (
+              <p className="text-sm text-bambu-gray">{t('finance.noTransactionsForFilter', 'No transactions match the selected filters.')}</p>
+            )}
+            {!txLoading && filteredTransactions.length > 0 && (
               <div className="overflow-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -649,7 +711,7 @@ export function FinancePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.map((tx) => {
+                    {filteredTransactions.map((tx) => {
                       const positive = tx.amount >= 0;
                       return (
                         <tr key={tx.id} className="border-b border-bambu-dark-tertiary/60 text-white">
