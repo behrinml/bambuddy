@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Clock3, Wallet } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock3, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
@@ -24,25 +24,65 @@ function parseBudgetValue(raw: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const fieldClass =
+  'w-full px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white placeholder-bambu-gray focus:outline-none focus:ring-1 focus:ring-bambu-green';
+const labelClass = 'block text-sm font-medium text-white mb-1';
+const tableHeadCellClass = 'px-4 py-3 text-left text-bambu-gray font-medium';
+const tableCellClass = 'px-4 py-3 align-top text-white';
+
+interface FinanceModalProps {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg';
+}
+
+function FinanceModal({ title, onClose, children, size = 'md' }: FinanceModalProps) {
+  const { t } = useTranslation();
+  const sizeClass = size === 'sm' ? 'max-w-xl' : size === 'lg' ? 'max-w-6xl' : 'max-w-4xl';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className={`w-full ${sizeClass} overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary`}>
+        <div className="flex items-center justify-between border-b border-bambu-dark-tertiary px-4 py-3">
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          <Button size="sm" variant="secondary" onClick={onClose}>{t('common.close', 'Close')}</Button>
+        </div>
+        <div className="max-h-[75vh] overflow-auto p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function FinancePage() {
   const { t, i18n } = useTranslation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
   const canReadOwn = hasPermission('finance:read_own');
-  const canReadCostCenters = hasPermission('finance:cost_centers:read');
+  const canReadAllFinance = hasPermission('finance:read_all');
   const canCreateCostCenters = hasPermission('finance:cost_centers:create');
+  const canUpdateCostCenters = hasPermission('finance:cost_centers:update');
   const canUpdateBudgets = hasPermission('finance:budgets:update');
   const canAssignCostCenterUsers = hasPermission('finance:cost_centers:assign_users');
   const canAdjustWallet = hasPermission('finance:transactions:create');
   const canReadUsers = hasPermission('users:read');
 
-  const canAccessFinance = canReadOwn || canReadCostCenters;
+  const canAccessAllCostCenters =
+    canReadAllFinance ||
+    canCreateCostCenters ||
+    canUpdateCostCenters ||
+    canUpdateBudgets ||
+    canAssignCostCenterUsers ||
+    canAdjustWallet;
+
+  const canAccessFinance = canReadOwn || canAccessAllCostCenters;
+  const canViewMyCostCenters = canAccessFinance;
 
   const [newCenterName, setNewCenterName] = useState('');
-  const [newCenterTotalBudget, setNewCenterTotalBudget] = useState('');
-  const [newCenterMonthlyBudget, setNewCenterMonthlyBudget] = useState('');
+  const [newCenterBudgetMode, setNewCenterBudgetMode] = useState<'total' | 'monthly'>('monthly');
+  const [newCenterBudgetValue, setNewCenterBudgetValue] = useState('');
 
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [selectedAdjustmentType, setSelectedAdjustmentType] = useState<'deposit' | 'withdraw'>('deposit');
@@ -59,7 +99,29 @@ export function FinancePage() {
   const [txTypeFilter, setTxTypeFilter] = useState<string>('all');
   const [txCostCenterFilter, setTxCostCenterFilter] = useState<number | 'all'>('all');
 
-  const [budgetDrafts, setBudgetDrafts] = useState<Record<number, { total: string; monthly: string }>>({});
+  const [showCreateCenterModal, setShowCreateCenterModal] = useState(false);
+  const [showAdjustWalletModal, setShowAdjustWalletModal] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [showEditCenterModal, setShowEditCenterModal] = useState(false);
+  const [financeViewMode, setFinanceViewMode] = useState<'personal' | 'admin'>('personal');
+  const [selectedEditCenterId, setSelectedEditCenterId] = useState<number | null>(null);
+  const [editCenterName, setEditCenterName] = useState('');
+  const [editCenterBudgetMode, setEditCenterBudgetMode] = useState<'total' | 'monthly'>('monthly');
+  const [editCenterBudgetValue, setEditCenterBudgetValue] = useState('');
+
+  const hasAdminFinanceControls =
+    canReadAllFinance ||
+    canCreateCostCenters ||
+    canUpdateCostCenters ||
+    canUpdateBudgets ||
+    (canAdjustWallet && canReadUsers) ||
+    (canAssignCostCenterUsers && canReadUsers);
+
+  useEffect(() => {
+    if (!hasAdminFinanceControls) {
+      setFinanceViewMode('personal');
+    }
+  }, [hasAdminFinanceControls]);
 
   const { data: wallet, isLoading: walletLoading } = useQuery({
     queryKey: ['finance', 'me', 'balance'],
@@ -67,22 +129,22 @@ export function FinancePage() {
     enabled: canReadOwn,
   });
 
-  const { data: transactions, isLoading: txLoading } = useQuery({
+  const { data: transactionsResponse, isLoading: txLoading } = useQuery({
     queryKey: ['finance', 'me', 'transactions', txLimit, txOffset],
     queryFn: () => api.getMyTransactions(txLimit, txOffset),
     enabled: canReadOwn,
   });
 
   const { data: costCenters, isLoading: centersLoading } = useQuery({
-    queryKey: ['finance', 'cost-centers', canUpdateBudgets || canCreateCostCenters ? 'all' : 'mine'],
-    queryFn: () => (canUpdateBudgets || canCreateCostCenters ? api.listCostCenters(true) : api.getMyCostCenters()),
-    enabled: canReadCostCenters,
+    queryKey: ['finance', 'cost-centers', financeViewMode],
+    queryFn: () => (financeViewMode === 'admin' && canAccessAllCostCenters ? api.listCostCenters(true) : api.getMyCostCenters()),
+    enabled: canViewMyCostCenters,
   });
 
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: api.getUsers,
-    enabled: (canAdjustWallet || canAssignCostCenterUsers) && canReadUsers,
+    enabled: canReadUsers && (canViewMyCostCenters || canAdjustWallet || canAssignCostCenterUsers),
   });
 
   const { data: selectedCenterDetail } = useQuery({
@@ -90,18 +152,6 @@ export function FinancePage() {
     queryFn: () => api.getCostCenter(selectedManageCenterId!),
     enabled: canAssignCostCenterUsers && selectedManageCenterId != null,
   });
-
-  useEffect(() => {
-    if (!costCenters || costCenters.length === 0) return;
-    const next: Record<number, { total: string; monthly: string }> = {};
-    for (const center of costCenters) {
-      next[center.id] = {
-        total: center.total_budget == null ? '' : String(center.total_budget),
-        monthly: center.monthly_budget == null ? '' : String(center.monthly_budget),
-      };
-    }
-    setBudgetDrafts(next);
-  }, [costCenters]);
 
   useEffect(() => {
     if (!users || users.length === 0) return;
@@ -127,19 +177,43 @@ export function FinancePage() {
     setMemberUserId(firstAvailable ? firstAvailable.id : null);
   }, [canAssignCostCenterUsers, users, selectedCenterDetail]);
 
+  useEffect(() => {
+    if (!showEditCenterModal) return;
+    const editableCenters = (costCenters || []).filter((center) => !center.is_private);
+    if (editableCenters.length === 0) {
+      setSelectedEditCenterId(null);
+      return;
+    }
+    if (selectedEditCenterId != null && editableCenters.some((center) => center.id === selectedEditCenterId)) return;
+    setSelectedEditCenterId(editableCenters[0].id);
+  }, [showEditCenterModal, selectedEditCenterId, costCenters]);
+
+  useEffect(() => {
+    if (!showEditCenterModal || selectedEditCenterId == null) return;
+    const center = (costCenters || []).find((entry) => entry.id === selectedEditCenterId);
+    if (!center) return;
+    setEditCenterName(center.name);
+    if (center.budget_mode === 'total') {
+      setEditCenterBudgetMode('total');
+      setEditCenterBudgetValue(center.total_budget == null ? '' : String(center.total_budget));
+      return;
+    }
+    setEditCenterBudgetMode('monthly');
+    setEditCenterBudgetValue(center.monthly_budget == null ? '' : String(center.monthly_budget));
+  }, [showEditCenterModal, selectedEditCenterId, costCenters]);
+
   const createCostCenterMutation = useMutation({
     mutationFn: () =>
       api.createCostCenter({
         name: newCenterName.trim(),
-        total_budget: parseBudgetValue(newCenterTotalBudget),
-        monthly_budget: parseBudgetValue(newCenterMonthlyBudget),
+        total_budget: newCenterBudgetMode === 'total' ? parseBudgetValue(newCenterBudgetValue) : null,
+        monthly_budget: newCenterBudgetMode === 'monthly' ? parseBudgetValue(newCenterBudgetValue) : null,
         is_active: true,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
       setNewCenterName('');
-      setNewCenterTotalBudget('');
-      setNewCenterMonthlyBudget('');
+      setNewCenterBudgetValue('');
       showToast(t('finance.createdCostCenter', 'Cost center created'));
     },
     onError: (error: Error) => {
@@ -148,18 +222,18 @@ export function FinancePage() {
   });
 
   const updateBudgetMutation = useMutation({
-    mutationFn: ({ costCenterId, total, monthly }: { costCenterId: number; total: string; monthly: string }) =>
+    mutationFn: ({ costCenterId, value, mode }: { costCenterId: number; value: string; mode: 'total' | 'monthly' }) =>
       api.updateCostCenterBudgets(costCenterId, {
-        total_budget: parseBudgetValue(total),
-        monthly_budget: parseBudgetValue(monthly),
+        total_budget: mode === 'total' ? parseBudgetValue(value) : null,
+        monthly_budget: mode === 'monthly' ? parseBudgetValue(value) : null,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['finance'] });
-      showToast(t('finance.budgetsSaved', 'Budgets saved'));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('finance.budgetSaveFailed', 'Failed to save budgets'), 'error');
-    },
+  });
+
+  const updateCostCenterMutation = useMutation({
+    mutationFn: ({ costCenterId, name }: { costCenterId: number; name: string }) =>
+      api.updateCostCenter(costCenterId, {
+        name,
+      }),
   });
 
   const depositMutation = useMutation({
@@ -217,10 +291,35 @@ export function FinancePage() {
     createCostCenterMutation.mutate();
   };
 
-  const handleSaveBudgets = (costCenterId: number) => {
-    const draft = budgetDrafts[costCenterId];
-    if (!draft) return;
-    updateBudgetMutation.mutate({ costCenterId, total: draft.total, monthly: draft.monthly });
+  const handleSaveEditedCenter = async () => {
+    if (selectedEditCenterId == null) {
+      showToast(t('finance.selectCostCenter', 'Please select a cost center'), 'error');
+      return;
+    }
+
+    const name = editCenterName.trim();
+    if (!name) {
+      showToast(t('finance.costCenterNameRequired', 'Cost center name is required'), 'error');
+      return;
+    }
+
+    try {
+      if (canUpdateCostCenters) {
+        await updateCostCenterMutation.mutateAsync({ costCenterId: selectedEditCenterId, name });
+      }
+      if (canUpdateBudgets) {
+        await updateBudgetMutation.mutateAsync({
+          costCenterId: selectedEditCenterId,
+          mode: editCenterBudgetMode,
+          value: editCenterBudgetValue,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      showToast(t('finance.costCenterUpdated', 'Cost center updated'));
+      setShowEditCenterModal(false);
+    } catch (error) {
+      showToast((error as Error).message || t('finance.costCenterUpdateFailed', 'Failed to update cost center'), 'error');
+    }
   };
 
   const handleWalletAdjustment = async () => {
@@ -289,13 +388,25 @@ export function FinancePage() {
     return [...(users || [])].sort((a, b) => a.username.localeCompare(b.username));
   }, [users]);
 
+  const usersById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const entry of sortedUsers) {
+      map.set(entry.id, entry.username);
+    }
+    return map;
+  }, [sortedUsers]);
+
   const availableUsersForCenter = useMemo(() => {
     const existingIds = new Set((selectedCenterDetail?.members || []).map((m) => m.user_id));
     return sortedUsers.filter((u) => !existingIds.has(u.id));
   }, [sortedUsers, selectedCenterDetail]);
 
+  const transactions = transactionsResponse?.items || [];
+  const txTotal = transactionsResponse?.total ?? 0;
+  const txTotalPages = Math.max(1, Math.ceil(txTotal / txLimit));
+
   const filteredTransactions = useMemo(() => {
-    const items = transactions || [];
+    const items = transactions;
     return items.filter((tx) => {
       if (txTypeFilter !== 'all' && tx.transaction_type !== txTypeFilter) return false;
       if (txCostCenterFilter !== 'all' && tx.cost_center_id !== txCostCenterFilter) return false;
@@ -303,11 +414,31 @@ export function FinancePage() {
     });
   }, [transactions, txTypeFilter, txCostCenterFilter]);
 
+  const txPage = Math.floor(txOffset / txLimit) + 1;
+  const showCostCenterAccountColumn = financeViewMode === 'admin';
+
+  const getPrivateOwnerLabel = (ownerUserId: number | null): string => {
+    if (ownerUserId == null) return t('finance.personal', 'Personal');
+    const ownerName = usersById.get(ownerUserId);
+    if (ownerName) return ownerName;
+    if (user?.id === ownerUserId && user.username) return user.username;
+    return t('finance.userWithId', 'User #{{id}}', { id: ownerUserId });
+  };
+
+  const formatBudgetProgress = (center: { budget_available: number | null; budget_limit: number | null }) => {
+    if (center.budget_limit == null || center.budget_available == null) return '-';
+    return `${currencySymbol}${center.budget_available.toFixed(2)}/${currencySymbol}${center.budget_limit.toFixed(2)}`;
+  };
+
   if (!canAccessFinance) {
     return (
-      <div className="space-y-6">
+      <div className="p-4 md:p-8 space-y-6">
+        <div className="flex items-center gap-2">
+          <Wallet className="h-6 w-6 text-bambu-green" />
+          <h1 className="text-2xl font-bold text-white">{t('finance.title', 'Finance')}</h1>
+        </div>
         <div>
-          <h1 className="text-3xl font-bold text-white">{t('finance.title', 'Finance')}</h1>
+          <p className="text-bambu-gray mt-2 max-w-2xl">{t('finance.subtitle', 'Wallet, transactions, and cost centers')}</p>
         </div>
         <Card>
           <CardContent className="py-8 text-center text-bambu-gray">
@@ -319,23 +450,74 @@ export function FinancePage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white">{t('finance.title', 'Finance')}</h1>
-        <p className="text-bambu-gray mt-1">{t('finance.subtitle', 'Wallet, transactions, and cost centers')}</p>
+    <div className="p-4 md:p-8 space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Wallet className="h-6 w-6 text-bambu-green" />
+            <h1 className="text-2xl font-bold text-white">{t('finance.title', 'Finance')}</h1>
+          </div>
+          <p className="text-bambu-gray mt-2 max-w-2xl">{t('finance.subtitle', 'Wallet, transactions, and cost centers')}</p>
+        </div>
+
+        <div className="flex flex-col gap-2 lg:items-end">
+          {hasAdminFinanceControls && (
+            <div className="inline-flex overflow-hidden rounded border border-bambu-dark-tertiary">
+              <button
+                type="button"
+                onClick={() => setFinanceViewMode('personal')}
+                className={`px-3 py-1.5 text-sm ${financeViewMode === 'personal' ? 'bg-bambu-green text-black font-medium' : 'bg-bambu-dark text-bambu-gray'}`}
+              >
+                {t('finance.personalView', 'Personal view')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceViewMode('admin')}
+                className={`px-3 py-1.5 text-sm ${financeViewMode === 'admin' ? 'bg-bambu-green text-black font-medium' : 'bg-bambu-dark text-bambu-gray'}`}
+              >
+                {t('finance.adminView', 'Admin view')}
+              </button>
+            </div>
+          )}
+
+          {financeViewMode === 'admin' && hasAdminFinanceControls && (
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+            {canCreateCostCenters && (
+              <Button size="sm" variant="secondary" onClick={() => setShowCreateCenterModal(true)}>
+                {t('finance.createCostCenter', 'Create cost center')}
+              </Button>
+            )}
+            {(canUpdateCostCenters || canUpdateBudgets) && (
+              <Button size="sm" variant="secondary" onClick={() => setShowEditCenterModal(true)}>
+                {t('finance.editCostCenter', 'Edit cost center')}
+              </Button>
+            )}
+            {canAdjustWallet && canReadUsers && (
+              <Button size="sm" variant="secondary" onClick={() => setShowAdjustWalletModal(true)}>
+                {t('finance.adjustWallet', 'Adjust wallet')}
+              </Button>
+            )}
+            {canAssignCostCenterUsers && canReadUsers && (
+              <Button size="sm" variant="secondary" onClick={() => setShowMembersModal(true)}>
+                {t('finance.manageMembers', 'Manage cost center members')}
+              </Button>
+            )}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <span className="text-sm text-bambu-gray">{t('finance.currentBalance', 'Current balance')}</span>
-            <Wallet className="w-4 h-4 text-bambu-green" />
+            <Wallet className="w-4 h-4 text-bambu-green/90" />
           </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-white">
+          <CardContent className="pt-1">
+            <p className="text-3xl font-semibold text-white leading-tight">
               {walletLoading ? t('common.loading', 'Loading...') : `${currencySymbol}${(wallet?.balance ?? 0).toFixed(2)}`}
             </p>
-            <p className="text-xs text-bambu-gray mt-2">
+            <p className="text-xs text-bambu-gray mt-3">
               {t('finance.lastUpdated', 'Updated')}: {formatTimestamp(wallet?.updated_at ?? null, i18n.language)}
             </p>
           </CardContent>
@@ -346,9 +528,9 @@ export function FinancePage() {
             <span className="text-sm text-bambu-gray">{t('finance.transactions', 'Transactions')}</span>
             <Clock3 className="w-4 h-4 text-blue-400" />
           </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-white">{txLoading ? '-' : transactions?.length ?? 0}</p>
-            <p className="text-xs text-bambu-gray mt-2">{t('finance.pageSize', 'Showing up to {{count}} entries per page', { count: txLimit })}</p>
+          <CardContent className="pt-1">
+            <p className="text-3xl font-semibold text-white leading-tight">{txLoading ? '-' : transactions?.length ?? 0}</p>
+            <p className="text-xs text-bambu-gray mt-3">{t('finance.paginationHint', 'Use pagination below to browse all transactions.')}</p>
           </CardContent>
         </Card>
 
@@ -357,134 +539,168 @@ export function FinancePage() {
             <span className="text-sm text-bambu-gray">{t('finance.costCenters', 'Cost centers')}</span>
             <Building2 className="w-4 h-4 text-orange-400" />
           </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-white">{centersLoading ? '-' : costCenters?.length ?? 0}</p>
-            <p className="text-xs text-bambu-gray mt-2">{t('finance.availableForPrinting', 'Available for print assignment')}</p>
+          <CardContent className="pt-1">
+            <p className="text-3xl font-semibold text-white leading-tight">{centersLoading ? '-' : costCenters?.length ?? 0}</p>
+            <p className="text-xs text-bambu-gray mt-3">{t('finance.availableForPrinting', 'Available for print assignment')}</p>
           </CardContent>
         </Card>
       </div>
 
-      {canCreateCostCenters && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-white">{t('finance.createCostCenter', 'Create cost center')}</h2>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-3">
-              <input
-                type="text"
-                value={newCenterName}
-                onChange={(e) => setNewCenterName(e.target.value)}
-                placeholder={t('finance.costCenterName', 'Name')}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCenterTotalBudget}
-                onChange={(e) => setNewCenterTotalBudget(e.target.value)}
-                placeholder={t('finance.totalBudget', 'Total budget')}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCenterMonthlyBudget}
-                onChange={(e) => setNewCenterMonthlyBudget(e.target.value)}
-                placeholder={t('finance.monthlyBudget', 'Monthly budget')}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              />
+      {showCreateCenterModal && canCreateCostCenters && (
+        <FinanceModal title={t('finance.createCostCenter', 'Create cost center')} size="md" onClose={() => setShowCreateCenterModal(false)}>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                <label className={labelClass}>{t('finance.costCenterName', 'Name')}</label>
+                <input
+                  type="text"
+                  value={newCenterName}
+                  onChange={(e) => setNewCenterName(e.target.value)}
+                  placeholder={t('finance.costCenterName', 'Name')}
+                  className={fieldClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>{t('finance.budgetType', 'Budget type')}</label>
+                <select
+                  value={newCenterBudgetMode}
+                  onChange={(e) => setNewCenterBudgetMode(e.target.value as 'total' | 'monthly')}
+                  className={fieldClass}
+                >
+                  <option value="monthly">{t('finance.monthlyBudget', 'Monthly budget')}</option>
+                  <option value="total">{t('finance.totalBudget', 'Total budget')}</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>
+                  {newCenterBudgetMode === 'monthly' ? t('finance.monthlyBudget', 'Monthly budget') : t('finance.totalBudget', 'Total budget')}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newCenterBudgetValue}
+                  onChange={(e) => setNewCenterBudgetValue(e.target.value)}
+                  placeholder="0.00"
+                  className={fieldClass}
+                />
+              </div>
             </div>
-            <Button onClick={handleCreateCostCenter} disabled={createCostCenterMutation.isPending}>
+            <Button className="min-w-[180px]" onClick={handleCreateCostCenter} disabled={createCostCenterMutation.isPending}>
               {createCostCenterMutation.isPending ? t('common.saving', 'Saving...') : t('finance.create', 'Create')}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </FinanceModal>
       )}
 
-      {canAdjustWallet && canReadUsers && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-white">{t('finance.adjustWallet', 'Adjust wallet')}</h2>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <select
-                value={selectedUserId ?? ''}
-                onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : null)}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                {(sortedUsers || []).map((u) => (
-                  <option key={u.id} value={u.id}>{u.username}</option>
-                ))}
-              </select>
+      {showAdjustWalletModal && canAdjustWallet && canReadUsers && (
+        <FinanceModal title={t('finance.adjustWallet', 'Adjust wallet')} size="md" onClose={() => setShowAdjustWalletModal(false)}>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className={labelClass}>{t('finance.selectUser', 'Select user')}</label>
+                <select
+                  value={selectedUserId ?? ''}
+                  onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : null)}
+                  className={fieldClass}
+                >
+                  {(sortedUsers || []).map((u) => (
+                    <option key={u.id} value={u.id}>{u.username}</option>
+                  ))}
+                </select>
+              </div>
 
-              <select
-                value={selectedAdjustmentType}
-                onChange={(e) => setSelectedAdjustmentType(e.target.value as 'deposit' | 'withdraw')}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                <option value="deposit">{t('finance.deposit', 'Deposit')}</option>
-                <option value="withdraw">{t('finance.withdraw', 'Withdraw')}</option>
-              </select>
+              <div>
+                <label className={labelClass}>{t('finance.transactionType', 'Type')}</label>
+                <select
+                  value={selectedAdjustmentType}
+                  onChange={(e) => setSelectedAdjustmentType(e.target.value as 'deposit' | 'withdraw')}
+                  className={fieldClass}
+                >
+                  <option value="deposit">{t('finance.deposit', 'Deposit')}</option>
+                  <option value="withdraw">{t('finance.withdraw', 'Withdraw')}</option>
+                </select>
+              </div>
 
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={adjustmentAmount}
-                onChange={(e) => setAdjustmentAmount(e.target.value)}
-                placeholder={t('finance.amount', 'Amount')}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              />
+              <div>
+                <label className={labelClass}>{t('finance.amount', 'Amount')}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={adjustmentAmount}
+                  onChange={(e) => setAdjustmentAmount(e.target.value)}
+                  placeholder="0.00"
+                  className={fieldClass}
+                />
+              </div>
 
-              <select
-                value={adjustmentCostCenterId ?? ''}
-                onChange={(e) => setAdjustmentCostCenterId(e.target.value ? Number(e.target.value) : null)}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                <option value="">{t('finance.noCostCenter', 'No cost center')}</option>
-                {(costCenters || []).map((center) => (
-                  <option key={center.id} value={center.id}>{center.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <input
-              type="text"
-              value={adjustmentDescription}
-              onChange={(e) => setAdjustmentDescription(e.target.value)}
-              placeholder={t('finance.descriptionOptional', 'Description (optional)')}
-              className="w-full px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-            />
-
-            <Button onClick={handleWalletAdjustment} disabled={isAdjustingWallet}>
-              {isAdjustingWallet ? t('common.saving', 'Saving...') : t('finance.applyAdjustment', 'Apply adjustment')}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {canAssignCostCenterUsers && canReadUsers && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-white">{t('finance.manageMembers', 'Manage cost center members')}</h2>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <select
-                value={selectedManageCenterId ?? ''}
-                onChange={(e) => setSelectedManageCenterId(e.target.value ? Number(e.target.value) : null)}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                {(costCenters || [])
-                  .filter((center) => !center.is_private)
-                  .map((center) => (
+              <div>
+                <label className={labelClass}>{t('finance.costCenters', 'Cost centers')}</label>
+                <select
+                  value={adjustmentCostCenterId ?? ''}
+                  onChange={(e) => setAdjustmentCostCenterId(e.target.value ? Number(e.target.value) : null)}
+                  className={fieldClass}
+                >
+                  <option value="">{t('finance.noCostCenter', 'No cost center')}</option>
+                  {(costCenters || []).map((center) => (
                     <option key={center.id} value={center.id}>{center.name}</option>
                   ))}
-              </select>
+                </select>
+              </div>
+            </div>
 
-              <div className="flex items-center gap-2">
+            <div>
+              <label className={labelClass}>{t('common.description', 'Description')}</label>
+              <input
+                type="text"
+                value={adjustmentDescription}
+                onChange={(e) => setAdjustmentDescription(e.target.value)}
+                placeholder={t('finance.descriptionOptional', 'Description (optional)')}
+                className={fieldClass}
+              />
+            </div>
+
+            <Button className="min-w-[180px]" onClick={handleWalletAdjustment} disabled={isAdjustingWallet}>
+              {isAdjustingWallet ? t('common.saving', 'Saving...') : t('finance.applyAdjustment', 'Apply adjustment')}
+            </Button>
+          </div>
+        </FinanceModal>
+      )}
+
+      {showMembersModal && canAssignCostCenterUsers && canReadUsers && (
+        <FinanceModal title={t('finance.manageMembers', 'Manage cost center members')} size="lg" onClose={() => setShowMembersModal(false)}>
+          <div className="space-y-5">
+            <div className="grid gap-5 md:grid-cols-2">
+              <div>
+                <label className={labelClass}>{t('finance.costCenters', 'Cost centers')}</label>
+                <select
+                  value={selectedManageCenterId ?? ''}
+                  onChange={(e) => setSelectedManageCenterId(e.target.value ? Number(e.target.value) : null)}
+                  className={fieldClass}
+                >
+                  {(costCenters || [])
+                    .filter((center) => !center.is_private)
+                    .map((center) => (
+                      <option key={center.id} value={center.id}>{center.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={labelClass}>{t('finance.selectUser', 'Select user')}</label>
+                <select
+                  value={memberUserId ?? ''}
+                  onChange={(e) => setMemberUserId(e.target.value ? Number(e.target.value) : null)}
+                  className={fieldClass}
+                >
+                  <option value="">{t('finance.selectUser', 'Select user')}</option>
+                  {availableUsersForCenter.map((u) => (
+                    <option key={u.id} value={u.id}>{u.username}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 rounded border border-bambu-dark-tertiary bg-bambu-dark-secondary px-3 py-2">
                 <input
                   id="memberCanPrint"
                   type="checkbox"
@@ -497,29 +713,20 @@ export function FinancePage() {
                 </label>
               </div>
 
-              <select
-                value={memberUserId ?? ''}
-                onChange={(e) => setMemberUserId(e.target.value ? Number(e.target.value) : null)}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                <option value="">{t('finance.selectUser', 'Select user')}</option>
-                {availableUsersForCenter.map((u) => (
-                  <option key={u.id} value={u.id}>{u.username}</option>
-                ))}
-              </select>
-
-              <Button onClick={handleAddMember} disabled={upsertMemberMutation.isPending || memberUserId == null}>
-                {upsertMemberMutation.isPending ? t('common.saving', 'Saving...') : t('finance.addMember', 'Add member')}
-              </Button>
+              <div className="flex items-end">
+                <Button className="min-w-[180px]" onClick={handleAddMember} disabled={upsertMemberMutation.isPending || memberUserId == null}>
+                  {upsertMemberMutation.isPending ? t('common.saving', 'Saving...') : t('finance.addMember', 'Add member')}
+                </Button>
+              </div>
             </div>
 
-            <div className="overflow-auto">
+            <div className="overflow-auto rounded-lg border border-bambu-dark-tertiary">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-bambu-dark-tertiary text-bambu-gray">
-                    <th className="text-left py-2 pr-3">{t('common.name', 'Name')}</th>
-                    <th className="text-left py-2 pr-3">{t('finance.canPrint', 'Can print')}</th>
-                    <th className="text-left py-2">{t('common.actions', 'Actions')}</th>
+                  <tr className="border-b border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray">
+                    <th className={tableHeadCellClass}>{t('common.name', 'Name')}</th>
+                    <th className={tableHeadCellClass}>{t('finance.canPrint', 'Can print')}</th>
+                    <th className={tableHeadCellClass}>{t('common.actions', 'Actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -527,9 +734,9 @@ export function FinancePage() {
                     const user = sortedUsers.find((u) => u.id === member.user_id);
                     return (
                       <tr key={member.id} className="border-b border-bambu-dark-tertiary/60 text-white">
-                        <td className="py-2 pr-3">{user?.username || `User ${member.user_id}`}</td>
-                        <td className="py-2 pr-3">{member.can_print ? t('common.yes', 'Yes') : t('common.no', 'No')}</td>
-                        <td className="py-2">
+                        <td className={tableCellClass}>{user?.username || `User ${member.user_id}`}</td>
+                        <td className={tableCellClass}>{member.can_print ? t('common.yes', 'Yes') : t('common.no', 'No')}</td>
+                        <td className={tableCellClass}>
                           <Button
                             size="sm"
                             variant="danger"
@@ -552,139 +759,211 @@ export function FinancePage() {
                 </tbody>
               </table>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </FinanceModal>
       )}
 
-      {canReadCostCenters && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-white">{t('finance.myCostCenters', 'My cost centers')}</h2>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {centersLoading && <p className="text-sm text-bambu-gray">{t('common.loading', 'Loading...')}</p>}
-            {!centersLoading && (!costCenters || costCenters.length === 0) && (
-              <p className="text-sm text-bambu-gray">{t('finance.noCostCenters', 'No cost centers found.')}</p>
-            )}
-            {!centersLoading && costCenters && costCenters.length > 0 && (
-              <div className="overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-bambu-dark-tertiary text-bambu-gray">
-                      <th className="text-left py-2 pr-3">{t('common.name', 'Name')}</th>
-                      <th className="text-left py-2 pr-3">{t('finance.type', 'Type')}</th>
-                      <th className="text-left py-2 pr-3">{t('finance.totalBudget', 'Total budget')}</th>
-                      <th className="text-left py-2 pr-3">{t('finance.monthlyBudget', 'Monthly budget')}</th>
-                      {canUpdateBudgets && <th className="text-left py-2">{t('common.actions', 'Actions')}</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {costCenters.map((center) => {
-                      const draft = budgetDrafts[center.id] || { total: '', monthly: '' };
-                      return (
-                        <tr key={center.id} className="border-b border-bambu-dark-tertiary/60 text-white">
-                          <td className="py-2 pr-3">{center.name}</td>
-                          <td className="py-2 pr-3">{center.is_private ? t('finance.personal', 'Personal') : t('finance.shared', 'Shared')}</td>
-                          <td className="py-2 pr-3">
-                            {canUpdateBudgets ? (
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={draft.total}
-                                onChange={(e) =>
-                                  setBudgetDrafts((prev) => ({
-                                    ...prev,
-                                    [center.id]: { ...draft, total: e.target.value },
-                                  }))
-                                }
-                                className="w-32 px-2 py-1 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white"
-                              />
-                            ) : center.total_budget == null ? '-' : `${currencySymbol}${center.total_budget.toFixed(2)}`}
-                          </td>
-                          <td className="py-2 pr-3">
-                            {canUpdateBudgets ? (
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={draft.monthly}
-                                onChange={(e) =>
-                                  setBudgetDrafts((prev) => ({
-                                    ...prev,
-                                    [center.id]: { ...draft, monthly: e.target.value },
-                                  }))
-                                }
-                                className="w-32 px-2 py-1 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white"
-                              />
-                            ) : center.monthly_budget == null ? '-' : `${currencySymbol}${center.monthly_budget.toFixed(2)}`}
-                          </td>
-                          {canUpdateBudgets && (
-                            <td className="py-2">
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => handleSaveBudgets(center.id)}
-                                disabled={updateBudgetMutation.isPending}
-                              >
-                                {t('common.save', 'Save')}
-                              </Button>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+      {showEditCenterModal && (canUpdateCostCenters || canUpdateBudgets) && (
+        <FinanceModal title={t('finance.editCostCenter', 'Edit cost center')} size="md" onClose={() => setShowEditCenterModal(false)}>
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>{t('finance.costCenters', 'Cost centers')}</label>
+              <select
+                value={selectedEditCenterId ?? ''}
+                onChange={(e) => setSelectedEditCenterId(e.target.value ? Number(e.target.value) : null)}
+                className={fieldClass}
+              >
+                {(costCenters || [])
+                  .filter((center) => !center.is_private)
+                  .map((center) => (
+                    <option key={center.id} value={center.id}>{center.name}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>{t('finance.costCenterName', 'Name')}</label>
+              <input
+                type="text"
+                value={editCenterName}
+                onChange={(e) => setEditCenterName(e.target.value)}
+                placeholder={t('finance.costCenterName', 'Name')}
+                className={fieldClass}
+                disabled={!canUpdateCostCenters}
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className={labelClass}>{t('finance.budgetType', 'Budget type')}</label>
+                <select
+                  value={editCenterBudgetMode}
+                  onChange={(e) => setEditCenterBudgetMode(e.target.value as 'total' | 'monthly')}
+                  className={fieldClass}
+                  disabled={!canUpdateBudgets}
+                >
+                  <option value="monthly">{t('finance.monthlyBudget', 'Monthly budget')}</option>
+                  <option value="total">{t('finance.totalBudget', 'Total budget')}</option>
+                </select>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              <div>
+                <label className={labelClass}>
+                  {editCenterBudgetMode === 'monthly' ? t('finance.monthlyBudget', 'Monthly budget') : t('finance.totalBudget', 'Total budget')}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editCenterBudgetValue}
+                  onChange={(e) => setEditCenterBudgetValue(e.target.value)}
+                  placeholder="0.00"
+                  className={fieldClass}
+                  disabled={!canUpdateBudgets}
+                />
+              </div>
+            </div>
+
+            <Button
+              className="min-w-[180px]"
+              onClick={handleSaveEditedCenter}
+              disabled={updateCostCenterMutation.isPending || updateBudgetMutation.isPending || selectedEditCenterId == null}
+            >
+              {(updateCostCenterMutation.isPending || updateBudgetMutation.isPending)
+                ? t('common.saving', 'Saving...')
+                : t('common.save', 'Save')}
+            </Button>
+          </div>
+        </FinanceModal>
       )}
 
-      {canReadOwn && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-lg font-semibold text-white">{t('finance.recentTransactions', 'Recent transactions')}</h2>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="grid gap-3 md:grid-cols-3">
-              <select
-                value={txTypeFilter}
-                onChange={(e) => setTxTypeFilter(e.target.value)}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                <option value="all">{t('finance.allTypes', 'All types')}</option>
-                <option value="deposit">{t('finance.deposit', 'Deposit')}</option>
-                <option value="withdraw">{t('finance.withdraw', 'Withdraw')}</option>
-              </select>
+      <div className={`grid gap-6 ${canViewMyCostCenters && canReadOwn ? 'xl:grid-cols-2' : ''}`}>
+        {canViewMyCostCenters && (
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-white">{t('finance.myCostCenters', 'My cost centers')}</h2>
+              <p className="text-sm text-bambu-gray mt-1">{t('finance.costCentersHint', 'Review budget limits and keep costs under control')}</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {centersLoading && <p className="text-sm text-bambu-gray">{t('common.loading', 'Loading...')}</p>}
+              {!centersLoading && (!costCenters || costCenters.length === 0) && (
+                <p className="text-sm text-bambu-gray">{t('finance.noCostCenters', 'No cost centers found.')}</p>
+              )}
+              {!centersLoading && costCenters && costCenters.length > 0 && (
+                <div className="overflow-auto rounded-lg border border-bambu-dark-tertiary">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray">
+                          <th className={tableHeadCellClass}>{t('common.name', 'Name')}</th>
+                          {showCostCenterAccountColumn && <th className={tableHeadCellClass}>{t('finance.owner', 'Owner')}</th>}
+                          <th className={tableHeadCellClass}>{t('finance.budget', 'Budget')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {costCenters.map((center) => {
+                        return (
+                          <tr key={center.id} className="border-b border-bambu-dark-tertiary/60 text-white">
+                              <td className={tableCellClass}>{center.name}</td>
+                              {showCostCenterAccountColumn && (
+                                <td className={tableCellClass}>{center.is_private ? getPrivateOwnerLabel(center.owner_user_id) : t('finance.shared', 'Shared')}</td>
+                              )}
+                              <td className={tableCellClass}>
+                              <div className="flex flex-col gap-0.5">
+                                <span>{formatBudgetProgress(center)}</span>
+                                <span className="text-xs text-bambu-gray">
+                                  {center.budget_mode === 'monthly'
+                                    ? t('finance.monthlyBudget', 'Monthly budget')
+                                    : center.budget_mode === 'total'
+                                      ? t('finance.totalBudget', 'Total budget')
+                                      : t('finance.noBudget', 'No budget')}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-              <select
-                value={txCostCenterFilter}
-                onChange={(e) => setTxCostCenterFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                className="px-3 py-2 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded text-white focus:outline-none focus:ring-1 focus:ring-bambu-green"
-              >
-                <option value="all">{t('finance.allCostCenters', 'All cost centers')}</option>
-                {(costCenters || []).map((center) => (
-                  <option key={center.id} value={center.id}>{center.name}</option>
-                ))}
-              </select>
+        {canReadOwn && (
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-white">{t('finance.recentTransactions', 'Recent transactions')}</h2>
+              <p className="text-sm text-bambu-gray mt-1">{t('finance.transactionsHint', 'Filter by type and cost center, then navigate pages')}</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                <label className={labelClass}>{t('finance.transactionType', 'Type')}</label>
+                <select
+                  value={txTypeFilter}
+                  onChange={(e) => setTxTypeFilter(e.target.value)}
+                  className={fieldClass}
+                >
+                  <option value="all">{t('finance.allTypes', 'All types')}</option>
+                  <option value="deposit">{t('finance.deposit', 'Deposit')}</option>
+                  <option value="withdraw">{t('finance.withdraw', 'Withdraw')}</option>
+                </select>
+              </div>
 
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
+              <div>
+                <label className={labelClass}>{t('finance.costCenters', 'Cost centers')}</label>
+                <select
+                  value={txCostCenterFilter}
+                  onChange={(e) => setTxCostCenterFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                  className={fieldClass}
+                >
+                  <option value="all">{t('finance.allCostCenters', 'All cost centers')}</option>
+                  {(costCenters || []).map((center) => (
+                    <option key={center.id} value={center.id}>{center.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-end justify-start md:justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTxOffset(0)}
+                  disabled={txOffset === 0 || txLoading}
+                  className="p-1.5 rounded text-bambu-gray hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label={t('finance.first', 'First')}
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => setTxOffset((prev) => Math.max(0, prev - txLimit))}
                   disabled={txOffset === 0 || txLoading}
+                  className="p-1.5 rounded text-bambu-gray hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label={t('finance.prev', 'Previous')}
                 >
-                  {t('finance.prev', 'Previous')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-bambu-gray px-1 whitespace-nowrap">
+                  {t('finance.pageNumberOf', 'Page {{page}} of {{total}}', { page: txPage, total: txTotalPages })}
+                </span>
+                <button
+                  type="button"
                   onClick={() => setTxOffset((prev) => prev + txLimit)}
-                  disabled={txLoading || (transactions?.length ?? 0) < txLimit}
+                  disabled={txLoading || txPage >= txTotalPages}
+                  className="p-1.5 rounded text-bambu-gray hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label={t('finance.next', 'Next')}
                 >
-                  {t('finance.next', 'Next')}
-                </Button>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTxOffset(Math.max(0, (txTotalPages - 1) * txLimit))}
+                  disabled={txLoading || txPage >= txTotalPages}
+                  className="p-1.5 rounded text-bambu-gray hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label={t('finance.last', 'Last')}
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
@@ -696,18 +975,18 @@ export function FinancePage() {
             {!txLoading && (!transactions || transactions.length === 0) && (
               <p className="text-sm text-bambu-gray">{t('finance.noTransactions', 'No transactions available.')}</p>
             )}
-            {!txLoading && transactions && transactions.length > 0 && filteredTransactions.length === 0 && (
+            {!txLoading && transactions.length > 0 && filteredTransactions.length === 0 && (
               <p className="text-sm text-bambu-gray">{t('finance.noTransactionsForFilter', 'No transactions match the selected filters.')}</p>
             )}
             {!txLoading && filteredTransactions.length > 0 && (
-              <div className="overflow-auto">
+              <div className="overflow-auto rounded-lg border border-bambu-dark-tertiary">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-bambu-dark-tertiary text-bambu-gray">
-                      <th className="text-left py-2 pr-3">{t('common.date', 'Date')}</th>
-                      <th className="text-left py-2 pr-3">{t('finance.transactionType', 'Type')}</th>
-                      <th className="text-left py-2 pr-3">{t('finance.amount', 'Amount')}</th>
-                      <th className="text-left py-2">{t('finance.balanceAfter', 'Balance after')}</th>
+                    <tr className="border-b border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray">
+                        <th className={tableHeadCellClass}>{t('common.date', 'Date')}</th>
+                        <th className={tableHeadCellClass}>{t('finance.transactionType', 'Type')}</th>
+                        <th className={tableHeadCellClass}>{t('finance.amount', 'Amount')}</th>
+                        <th className={tableHeadCellClass}>{t('finance.balanceAfter', 'Balance after')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -715,12 +994,12 @@ export function FinancePage() {
                       const positive = tx.amount >= 0;
                       return (
                         <tr key={tx.id} className="border-b border-bambu-dark-tertiary/60 text-white">
-                          <td className="py-2 pr-3">{formatTimestamp(tx.created_at, i18n.language)}</td>
-                          <td className="py-2 pr-3 capitalize">{tx.transaction_type}</td>
-                          <td className={`py-2 pr-3 ${positive ? 'text-green-400' : 'text-red-400'}`}>
+                            <td className={tableCellClass}>{formatTimestamp(tx.created_at, i18n.language)}</td>
+                            <td className={tableCellClass + ' capitalize'}>{tx.transaction_type}</td>
+                            <td className={`${tableCellClass} ${positive ? 'text-green-400' : 'text-red-400'}`}>
                             {positive ? '+' : '-'}{currencySymbol}{Math.abs(tx.amount).toFixed(2)}
                           </td>
-                          <td className="py-2">{tx.balance_after == null ? '-' : `${currencySymbol}${tx.balance_after.toFixed(2)}`}</td>
+                            <td className={tableCellClass}>{tx.balance_after == null ? '-' : `${currencySymbol}${tx.balance_after.toFixed(2)}`}</td>
                         </tr>
                       );
                     })}
@@ -728,9 +1007,10 @@ export function FinancePage() {
                 </table>
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

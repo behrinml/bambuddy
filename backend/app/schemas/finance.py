@@ -27,6 +27,13 @@ class WalletTransactionResponse(BaseModel):
         from_attributes = True
 
 
+class WalletTransactionListResponse(BaseModel):
+    items: list[WalletTransactionResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class CostCenterSummaryResponse(BaseModel):
     id: int
     name: str
@@ -35,6 +42,10 @@ class CostCenterSummaryResponse(BaseModel):
     is_active: bool
     total_budget: float | None = None
     monthly_budget: float | None = None
+    budget_mode: str = "none"
+    budget_limit: float | None = None
+    budget_used: float | None = None
+    budget_available: float | None = None
     can_print: bool = True
 
     class Config:

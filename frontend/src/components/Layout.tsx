@@ -284,6 +284,17 @@ export function Layout() {
     };
 
     const isHidden = (id: string) => {
+      if (id === 'finance' && authEnabled) {
+        const canSeeFinance =
+          hasPermission('finance:read_own') ||
+          hasPermission('finance:read_all') ||
+          hasPermission('finance:transactions:create') ||
+          hasPermission('finance:cost_centers:create') ||
+          hasPermission('finance:cost_centers:update') ||
+          hasPermission('finance:cost_centers:assign_users') ||
+          hasPermission('finance:budgets:update');
+        if (!canSeeFinance) return true;
+      }
       if (authEnabled && id in navPermissions && !hasPermission(navPermissions[id])) return true;
       // notifications nav item also requires advanced auth to be enabled and user_notifications_enabled setting
       if (id === 'notifications' && (!authEnabled || !advancedAuthStatus?.advanced_auth_enabled || (settings?.user_notifications_enabled === false))) return true;

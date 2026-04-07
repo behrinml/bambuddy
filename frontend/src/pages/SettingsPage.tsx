@@ -780,6 +780,8 @@ export function SettingsPage() {
       (settings.default_timelapse ?? false) !== (localSettings.default_timelapse ?? false) ||
       (settings.stagger_group_size ?? 2) !== (localSettings.stagger_group_size ?? 2) ||
       (settings.stagger_interval_minutes ?? 5) !== (localSettings.stagger_interval_minutes ?? 5) ||
+      (settings.finance_budget_reset_day ?? 1) !== (localSettings.finance_budget_reset_day ?? 1) ||
+      (settings.finance_budget_reset_timezone ?? 'UTC') !== (localSettings.finance_budget_reset_timezone ?? 'UTC') ||
       (settings.require_plate_clear ?? true) !== (localSettings.require_plate_clear ?? true);
 
     if (!hasChanges) {
@@ -861,6 +863,8 @@ export function SettingsPage() {
         default_timelapse: localSettings.default_timelapse,
         stagger_group_size: localSettings.stagger_group_size,
         stagger_interval_minutes: localSettings.stagger_interval_minutes,
+        finance_budget_reset_day: localSettings.finance_budget_reset_day,
+        finance_budget_reset_timezone: localSettings.finance_budget_reset_timezone,
         require_plate_clear: localSettings.require_plate_clear,
       };
       updateMutation.mutate(settingsToSave);
@@ -3435,6 +3439,72 @@ export function SettingsPage() {
                   />
                   <p className="text-xs text-bambu-gray mt-1">
                     {t('settings.staggerIntervalHelp', 'Delay between each group starting')}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Finance Monthly Budget Reset */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-bambu-green" />
+                {t('settings.financeBudgetReset', 'Finance Monthly Budget Reset')}
+              </h3>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-bambu-gray">
+                {t(
+                  'settings.financeBudgetResetDescription',
+                  'Controls when monthly cost center budgets reset. Total budgets are unaffected.'
+                )}
+              </p>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">
+                    {t('settings.financeBudgetResetDay', 'Reset day of month')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={localSettings.finance_budget_reset_day ?? 1}
+                    onChange={(e) =>
+                      updateSetting(
+                        'finance_budget_reset_day',
+                        Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1))
+                      )
+                    }
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  />
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.financeBudgetResetDayHelp', 'For short months, reset uses the last day of the month.')}
+                  </p>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-bambu-gray mb-1">
+                    {t('settings.financeBudgetResetTimezone', 'Reset timezone')}
+                  </label>
+                  <select
+                    value={localSettings.finance_budget_reset_timezone ?? 'UTC'}
+                    onChange={(e) => updateSetting('finance_budget_reset_timezone', e.target.value)}
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
+                  >
+                    <option value="UTC">UTC</option>
+                    <option value="Europe/Berlin">Europe/Berlin</option>
+                    <option value="Europe/Vienna">Europe/Vienna</option>
+                    <option value="Europe/Zurich">Europe/Zurich</option>
+                    <option value="America/New_York">America/New_York</option>
+                    <option value="America/Chicago">America/Chicago</option>
+                    <option value="America/Denver">America/Denver</option>
+                    <option value="America/Los_Angeles">America/Los_Angeles</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo</option>
+                    <option value="Asia/Singapore">Asia/Singapore</option>
+                    <option value="Australia/Sydney">Australia/Sydney</option>
+                  </select>
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.financeBudgetResetTimezoneHelp', 'Budget window start is calculated in this timezone.')}
                   </p>
                 </div>
               </div>

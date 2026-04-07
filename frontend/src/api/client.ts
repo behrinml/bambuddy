@@ -897,6 +897,9 @@ export interface AppSettings {
   // Staggered batch start defaults
   stagger_group_size: number;
   stagger_interval_minutes: number;
+  // Finance budget reset window
+  finance_budget_reset_day: number;
+  finance_budget_reset_timezone: string;
   // Plate-clear confirmation
   require_plate_clear: boolean;
   // Shortest job first scheduling
@@ -2179,6 +2182,10 @@ export interface CostCenterSummary {
   is_active: boolean;
   total_budget: number | null;
   monthly_budget: number | null;
+  budget_mode: 'none' | 'total' | 'monthly';
+  budget_limit: number | null;
+  budget_used: number | null;
+  budget_available: number | null;
   can_print: boolean;
 }
 
@@ -2192,6 +2199,11 @@ export interface CostCenterCreateRequest {
 export interface CostCenterBudgetUpdateRequest {
   total_budget?: number | null;
   monthly_budget?: number | null;
+}
+
+export interface CostCenterUpdateRequest {
+  name?: string;
+  is_active?: boolean;
 }
 
 export interface CostCenterMemberRequest {
@@ -2232,6 +2244,13 @@ export interface WalletTransaction {
   created_at: string;
 }
 
+export interface WalletTransactionListResponse {
+  items: WalletTransaction[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface WalletAdjustmentRequest {
   amount: number;
   description?: string;
@@ -2268,7 +2287,7 @@ export type Permission =
   | 'firmware:read' | 'firmware:update'
   | 'ams_history:read'
   | 'finance:read_own' | 'finance:read_all' | 'finance:transactions:create'
-  | 'finance:cost_centers:read' | 'finance:cost_centers:create' | 'finance:cost_centers:update' | 'finance:cost_centers:assign_users'
+  | 'finance:cost_centers:create' | 'finance:cost_centers:update' | 'finance:cost_centers:assign_users'
   | 'finance:budgets:update'
   | 'stats:read' | 'stats:filter_by_user'
   | 'system:read'
@@ -3592,13 +3611,18 @@ export const api = {
   // Finance
   getMyBalance: () => request<WalletBalance>('/finance/me/balance'),
   getMyTransactions: (limit = 50, offset = 0) =>
-    request<WalletTransaction[]>(`/finance/me/transactions?limit=${limit}&offset=${offset}`),
+    request<WalletTransactionListResponse>(`/finance/me/transactions?limit=${limit}&offset=${offset}`),
   getMyCostCenters: () => request<CostCenterSummary[]>('/finance/cost-centers/mine'),
   listCostCenters: (includeInactive = false) =>
     request<CostCenterSummary[]>(`/finance/cost-centers?include_inactive=${includeInactive ? 'true' : 'false'}`),
   createCostCenter: (data: CostCenterCreateRequest) =>
     request<CostCenterSummary>('/finance/cost-centers', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCostCenter: (costCenterId: number, data: CostCenterUpdateRequest) =>
+    request<CostCenterSummary>(`/finance/cost-centers/${costCenterId}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
   updateCostCenterBudgets: (costCenterId: number, data: CostCenterBudgetUpdateRequest) =>

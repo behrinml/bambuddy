@@ -267,11 +267,10 @@ export function PrintModal({
     queryFn: api.getPrinters,
   });
 
-  const canReadCostCenters = hasPermission('finance:cost_centers:read');
   const { data: myCostCenters } = useQuery({
     queryKey: ['finance', 'cost-centers', 'mine'],
     queryFn: api.getMyCostCenters,
-    enabled: !!user && canReadCostCenters,
+    enabled: !!user,
   });
 
   const printableCostCenters = useMemo(
@@ -281,13 +280,12 @@ export function PrintModal({
 
   // Select default cost center once loaded (prefer private/personal)
   useEffect(() => {
-    if (!canReadCostCenters) return;
     if (printableCostCenters.length === 0) return;
     if (selectedCostCenterId != null && printableCostCenters.some((c) => c.id === selectedCostCenterId)) return;
 
     const preferredPrivate = printableCostCenters.find((c) => c.is_private);
     setSelectedCostCenterId(preferredPrivate ? preferredPrivate.id : printableCostCenters[0].id);
-  }, [canReadCostCenters, printableCostCenters, selectedCostCenterId]);
+  }, [printableCostCenters, selectedCostCenterId]);
 
   const { data: spoolAssignments } = useQuery({
     queryKey: ['spool-assignments'],
@@ -955,12 +953,10 @@ export function PrintModal({
         className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <CardContent className={mode === 'reprint' ? '' : 'p-0'}>
+        <CardContent className="p-5 md:p-6">
           {/* Header */}
           <div
-            className={`flex items-center justify-between ${
-              mode === 'reprint' ? 'mb-4' : 'p-4 border-b border-bambu-dark-tertiary'
-            }`}
+            className="flex items-center justify-between border-b border-bambu-dark-tertiary pb-4 mb-4"
           >
             <div className="flex items-center gap-2">
               <TitleIcon className="w-5 h-5 text-bambu-green" />
@@ -971,9 +967,9 @@ export function PrintModal({
             </Button>
           </div>
 
-          <form onSubmit={handleSubmit} className={mode === 'reprint' ? '' : 'p-4 space-y-4'}>
+          <form onSubmit={handleSubmit} className="space-y-5">
             {/* Archive name */}
-            <p className={`text-sm text-bambu-gray ${mode === 'reprint' ? 'mb-4' : ''}`}>
+            <p className="text-sm text-bambu-gray">
               {mode === 'reprint' ? (
                 <>
                   Send <span className="text-white">{archiveName}</span> to{' '}
@@ -1099,7 +1095,7 @@ export function PrintModal({
               <PrintOptionsPanel options={printOptions} onChange={setPrintOptions} defaultExpanded={!!initialSelectedPrinterIds?.length} />
             )}
 
-            {canReadCostCenters && (
+            {printableCostCenters.length > 0 && (
               <CostCenterSelect
                 costCenters={printableCostCenters}
                 selectedCostCenterId={selectedCostCenterId}

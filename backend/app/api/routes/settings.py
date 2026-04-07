@@ -127,6 +127,7 @@ async def get_settings(
                 "mqtt_port",
                 "stagger_group_size",
                 "stagger_interval_minutes",
+                "finance_budget_reset_day",
             ]:
                 settings_dict[setting.key] = int(setting.value)
             elif setting.key == "default_printer_id":

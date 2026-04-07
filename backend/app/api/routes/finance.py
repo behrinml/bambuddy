@@ -1,12 +1,17 @@
+import calendar
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.app.core.auth import RequirePermissionIfAuthEnabled
+from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_auth_if_enabled
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.finance import CostCenter, CostCenterMember, UserWallet, WalletTransaction
+from backend.app.models.settings import Settings
 from backend.app.models.user import User
 from backend.app.schemas.finance import (
     CostCenterBudgetUpdateRequest,
@@ -19,16 +24,158 @@ from backend.app.schemas.finance import (
     WalletAdjustmentRequest,
     WalletAdjustmentResponse,
     WalletBalanceResponse,
+    WalletTransactionListResponse,
     WalletTransactionResponse,
 )
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 
 
+def _clamp_day(year: int, month: int, desired_day: int) -> int:
+    return min(max(1, desired_day), calendar.monthrange(year, month)[1])
+
+
+async def _get_budget_window_start_utc(db: AsyncSession) -> datetime:
+    """Resolve monthly budget window start in UTC using configurable reset day/timezone.
+
+    Defaults preserve current behavior: day=1, timezone=UTC.
+    """
+    desired_day = 1
+    tz_name = "UTC"
+
+    result = await db.execute(
+        select(Settings).where(Settings.key.in_(["finance_budget_reset_day", "finance_budget_reset_timezone"]))
+    )
+    for setting in result.scalars().all():
+        if setting.key == "finance_budget_reset_day":
+            try:
+                parsed = int(setting.value)
+                if 1 <= parsed <= 31:
+                    desired_day = parsed
+            except (TypeError, ValueError):
+                pass
+        elif setting.key == "finance_budget_reset_timezone":
+            value = (setting.value or "").strip()
+            if value:
+                tz_name = value
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        tz = timezone.utc
+
+    now_local = datetime.now(tz)
+    current_month_reset_day = _clamp_day(now_local.year, now_local.month, desired_day)
+
+    if now_local.day >= current_month_reset_day:
+        start_local = datetime(now_local.year, now_local.month, current_month_reset_day, tzinfo=tz)
+    else:
+        prev_year = now_local.year
+        prev_month = now_local.month - 1
+        if prev_month == 0:
+            prev_month = 12
+            prev_year -= 1
+        prev_month_reset_day = _clamp_day(prev_year, prev_month, desired_day)
+        start_local = datetime(prev_year, prev_month, prev_month_reset_day, tzinfo=tz)
+
+    return start_local.astimezone(timezone.utc)
+
+
+async def _get_cost_center_usage_maps(
+    db: AsyncSession,
+    cost_center_ids: list[int],
+) -> tuple[dict[int, float], dict[int, float]]:
+    if not cost_center_ids:
+        return {}, {}
+
+    spend_expr = case((WalletTransaction.amount < 0, -WalletTransaction.amount), else_=0.0)
+
+    total_rows = await db.execute(
+        select(WalletTransaction.cost_center_id, func.coalesce(func.sum(spend_expr), 0.0))
+        .where(
+            WalletTransaction.cost_center_id.in_(cost_center_ids),
+            WalletTransaction.cost_center_id.is_not(None),
+        )
+        .group_by(WalletTransaction.cost_center_id)
+    )
+
+    budget_window_start_utc = await _get_budget_window_start_utc(db)
+
+    month_rows = await db.execute(
+        select(WalletTransaction.cost_center_id, func.coalesce(func.sum(spend_expr), 0.0))
+        .where(
+            WalletTransaction.cost_center_id.in_(cost_center_ids),
+            WalletTransaction.cost_center_id.is_not(None),
+            WalletTransaction.created_at >= budget_window_start_utc,
+        )
+        .group_by(WalletTransaction.cost_center_id)
+    )
+
+    total_map = {int(center_id): float(value) for center_id, value in total_rows.all() if center_id is not None}
+    month_map = {int(center_id): float(value) for center_id, value in month_rows.all() if center_id is not None}
+    return total_map, month_map
+
+
+def _budget_mode_and_limit(center: CostCenter) -> tuple[str, float | None]:
+    # Monthly takes precedence if legacy data still has both set.
+    if center.monthly_budget is not None:
+        return "monthly", float(center.monthly_budget)
+    if center.total_budget is not None:
+        return "total", float(center.total_budget)
+    return "none", None
+
+
+def _to_cost_center_summary(
+    center: CostCenter,
+    *,
+    can_print: bool,
+    total_usage: float,
+    month_usage: float,
+) -> CostCenterSummaryResponse:
+    budget_mode, budget_limit = _budget_mode_and_limit(center)
+    budget_used = month_usage if budget_mode == "monthly" else total_usage if budget_mode == "total" else None
+    budget_available = (
+        max(0.0, budget_limit - budget_used) if budget_limit is not None and budget_used is not None else None
+    )
+
+    return CostCenterSummaryResponse(
+        id=center.id,
+        name=center.name,
+        is_private=center.is_private,
+        owner_user_id=center.owner_user_id,
+        is_active=center.is_active,
+        total_budget=center.total_budget,
+        monthly_budget=center.monthly_budget,
+        budget_mode=budget_mode,
+        budget_limit=budget_limit,
+        budget_used=budget_used,
+        budget_available=budget_available,
+        can_print=can_print,
+    )
+
+
 async def _require_authenticated_user(current_user: User | None) -> User:
     if current_user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     return current_user
+
+
+def _has_cost_center_admin_access(user: User) -> bool:
+    return user.has_any_permission(
+        Permission.FINANCE_READ_ALL.value,
+        Permission.FINANCE_TRANSACTIONS_CREATE.value,
+        Permission.FINANCE_COST_CENTERS_CREATE.value,
+        Permission.FINANCE_COST_CENTERS_UPDATE.value,
+        Permission.FINANCE_COST_CENTERS_ASSIGN_USERS.value,
+        Permission.FINANCE_BUDGETS_UPDATE.value,
+    )
+
+
+async def _require_cost_center_admin_access(current_user: User | None) -> User:
+    user = await _require_authenticated_user(current_user)
+    if not _has_cost_center_admin_access(user):
+        raise HTTPException(status_code=403, detail="Missing required permissions for cost center administration")
+    return user
 
 
 async def _get_or_create_wallet(db: AsyncSession, user_id: int) -> UserWallet:
@@ -124,7 +271,7 @@ async def get_my_balance(
     )
 
 
-@router.get("/me/transactions", response_model=list[WalletTransactionResponse])
+@router.get("/me/transactions", response_model=WalletTransactionListResponse)
 async def get_my_transactions(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -134,6 +281,11 @@ async def get_my_transactions(
     """Return wallet ledger entries for the current user."""
     user = await _require_authenticated_user(current_user)
 
+    total_result = await db.execute(
+        select(func.count(WalletTransaction.id)).where(WalletTransaction.user_id == user.id)
+    )
+    total = int(total_result.scalar_one() or 0)
+
     result = await db.execute(
         select(WalletTransaction)
         .where(WalletTransaction.user_id == user.id)
@@ -142,13 +294,18 @@ async def get_my_transactions(
         .offset(offset)
     )
     transactions = result.scalars().all()
-    return [WalletTransactionResponse.model_validate(tx) for tx in transactions]
+    return WalletTransactionListResponse(
+        items=[WalletTransactionResponse.model_validate(tx) for tx in transactions],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/cost-centers/mine", response_model=list[CostCenterSummaryResponse])
 async def get_my_cost_centers(
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.FINANCE_COST_CENTERS_READ),
+    current_user: User | None = Depends(require_auth_if_enabled),
 ):
     """Return private and assigned cost centers for the current user."""
     user = await _require_authenticated_user(current_user)
@@ -169,18 +326,19 @@ async def get_my_cost_centers(
         .order_by(CostCenter.is_private.desc(), CostCenter.name.asc())
     )
 
+    rows = result.all()
+    centers_only = [center for center, _ in rows]
+    center_ids = [center.id for center in centers_only]
+    total_usage_map, month_usage_map = await _get_cost_center_usage_maps(db, center_ids)
+
     centers: list[CostCenterSummaryResponse] = []
-    for center, can_print in result.all():
+    for center, can_print in rows:
         centers.append(
-            CostCenterSummaryResponse(
-                id=center.id,
-                name=center.name,
-                is_private=center.is_private,
-                owner_user_id=center.owner_user_id,
-                is_active=center.is_active,
-                total_budget=center.total_budget,
-                monthly_budget=center.monthly_budget,
+            _to_cost_center_summary(
+                center,
                 can_print=True if center.is_private and center.owner_user_id == user.id else bool(can_print),
+                total_usage=total_usage_map.get(center.id, 0.0),
+                month_usage=month_usage_map.get(center.id, 0.0),
             )
         )
 
@@ -268,29 +426,28 @@ async def withdraw_user_balance(
 async def list_cost_centers(
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.FINANCE_COST_CENTERS_READ),
+    current_user: User | None = Depends(require_auth_if_enabled),
 ):
     """List all cost centers.
 
-    Requires finance:cost_centers:read.
+    Requires admin-level finance permissions.
     """
-    await _require_authenticated_user(current_user)
+    await _require_cost_center_admin_access(current_user)
     query = select(CostCenter).order_by(CostCenter.is_private.desc(), CostCenter.name.asc())
     if not include_inactive:
         query = query.where(CostCenter.is_active.is_(True))
 
     result = await db.execute(query)
     centers = result.scalars().all()
+    center_ids = [center.id for center in centers]
+    total_usage_map, month_usage_map = await _get_cost_center_usage_maps(db, center_ids)
+
     return [
-        CostCenterSummaryResponse(
-            id=center.id,
-            name=center.name,
-            is_private=center.is_private,
-            owner_user_id=center.owner_user_id,
-            is_active=center.is_active,
-            total_budget=center.total_budget,
-            monthly_budget=center.monthly_budget,
+        _to_cost_center_summary(
+            center,
             can_print=True,
+            total_usage=total_usage_map.get(center.id, 0.0),
+            month_usage=month_usage_map.get(center.id, 0.0),
         )
         for center in centers
     ]
@@ -304,47 +461,45 @@ async def create_cost_center(
 ):
     """Create a shared cost center."""
     await _require_authenticated_user(current_user)
+    total_budget = body.total_budget
+    monthly_budget = body.monthly_budget
+    if monthly_budget is not None:
+        total_budget = None
+    elif total_budget is not None:
+        monthly_budget = None
+
     center = CostCenter(
         name=body.name.strip(),
         is_active=body.is_active,
         is_private=False,
         owner_user_id=None,
-        total_budget=body.total_budget,
-        monthly_budget=body.monthly_budget,
+        total_budget=total_budget,
+        monthly_budget=monthly_budget,
     )
     db.add(center)
     await db.flush()
 
-    return CostCenterSummaryResponse(
-        id=center.id,
-        name=center.name,
-        is_private=center.is_private,
-        owner_user_id=center.owner_user_id,
-        is_active=center.is_active,
-        total_budget=center.total_budget,
-        monthly_budget=center.monthly_budget,
-        can_print=True,
-    )
+    return _to_cost_center_summary(center, can_print=True, total_usage=0.0, month_usage=0.0)
 
 
 @router.get("/cost-centers/{cost_center_id}", response_model=CostCenterDetailResponse)
 async def get_cost_center(
     cost_center_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.FINANCE_COST_CENTERS_READ),
+    current_user: User | None = Depends(require_auth_if_enabled),
 ):
     """Get one cost center with its memberships."""
-    await _require_authenticated_user(current_user)
+    await _require_cost_center_admin_access(current_user)
     center = await _get_cost_center_or_404(db, cost_center_id)
-    return CostCenterDetailResponse(
-        id=center.id,
-        name=center.name,
-        is_private=center.is_private,
-        owner_user_id=center.owner_user_id,
-        is_active=center.is_active,
-        total_budget=center.total_budget,
-        monthly_budget=center.monthly_budget,
+    total_usage_map, month_usage_map = await _get_cost_center_usage_maps(db, [center.id])
+    summary = _to_cost_center_summary(
+        center,
         can_print=True,
+        total_usage=total_usage_map.get(center.id, 0.0),
+        month_usage=month_usage_map.get(center.id, 0.0),
+    )
+    return CostCenterDetailResponse(
+        **summary.model_dump(),
         members=[CostCenterMemberResponse.model_validate(m) for m in center.members],
     )
 
@@ -367,15 +522,12 @@ async def update_cost_center(
 
     await db.flush()
 
-    return CostCenterSummaryResponse(
-        id=center.id,
-        name=center.name,
-        is_private=center.is_private,
-        owner_user_id=center.owner_user_id,
-        is_active=center.is_active,
-        total_budget=center.total_budget,
-        monthly_budget=center.monthly_budget,
+    total_usage_map, month_usage_map = await _get_cost_center_usage_maps(db, [center.id])
+    return _to_cost_center_summary(
+        center,
         can_print=True,
+        total_usage=total_usage_map.get(center.id, 0.0),
+        month_usage=month_usage_map.get(center.id, 0.0),
     )
 
 
@@ -390,19 +542,23 @@ async def update_cost_center_budgets(
     await _require_authenticated_user(current_user)
     center = await _get_cost_center_or_404(db, cost_center_id)
 
-    center.total_budget = body.total_budget
-    center.monthly_budget = body.monthly_budget
+    if body.monthly_budget is not None:
+        center.monthly_budget = body.monthly_budget
+        center.total_budget = None
+    elif body.total_budget is not None:
+        center.total_budget = body.total_budget
+        center.monthly_budget = None
+    else:
+        center.total_budget = None
+        center.monthly_budget = None
     await db.flush()
 
-    return CostCenterSummaryResponse(
-        id=center.id,
-        name=center.name,
-        is_private=center.is_private,
-        owner_user_id=center.owner_user_id,
-        is_active=center.is_active,
-        total_budget=center.total_budget,
-        monthly_budget=center.monthly_budget,
+    total_usage_map, month_usage_map = await _get_cost_center_usage_maps(db, [center.id])
+    return _to_cost_center_summary(
+        center,
         can_print=True,
+        total_usage=total_usage_map.get(center.id, 0.0),
+        month_usage=month_usage_map.get(center.id, 0.0),
     )
 
 
