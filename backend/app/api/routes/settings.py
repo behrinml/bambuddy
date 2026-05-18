@@ -107,6 +107,8 @@ async def get_settings(
                 "default_vibration_cali",
                 "default_layer_inspect",
                 "default_timelapse",
+                "billing_enabled",
+                "printer_kill_switch_enabled",
                 "ldap_enabled",
                 "ldap_auto_provision",
             ]:
@@ -130,6 +132,7 @@ async def get_settings(
                 "mqtt_port",
                 "stagger_group_size",
                 "stagger_interval_minutes",
+                "finance_budget_reset_day",
             ]:
                 settings_dict[setting.key] = int(setting.value)
             elif setting.key == "default_printer_id":
