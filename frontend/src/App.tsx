@@ -7,6 +7,7 @@ import { ArchivesPage } from './pages/ArchivesPage';
 import { QueuePage } from './pages/QueuePage';
 import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { FinancePage } from './pages/FinancePage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -126,6 +127,34 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PermissionRoute({ permission, children }: { permission: string; children: React.ReactNode }) {
+  // Permission-gated route: any user with the given permission can enter, not
+  // just admins. Individual components below this guard apply their own
+  // per-action permission checks. Used for pages where delegation is supported
+  // (e.g. settings:read grants read-only access to Settings; specific tabs
+  // require their own permissions like users:read, groups:update, etc.).
+  const { authEnabled, loading, user, hasPermission } = useAuth();
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
+
+  // Auth disabled → open access (backward compatibility)
+  if (!authEnabled) {
+    return <>{children}</>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!hasPermission(permission as Parameters<typeof hasPermission>[0])) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function SetupRoute({ children }: { children: React.ReactNode }) {
   const { authEnabled, loading } = useAuth();
 
@@ -183,6 +212,7 @@ function App() {
                   <Route path="queue" element={<QueuePage />} />
                   <Route path="stats" element={<StatsPage />} />
                   <Route path="profiles" element={<ProfilesPage />} />
+                  <Route path="finance" element={<PermissionRoute permission="cost_centers:read_own"><FinancePage /></PermissionRoute>} />
                   <Route path="maintenance" element={<MaintenancePage />} />
                   <Route path="projects" element={<ProjectsPage />} />
                   <Route path="projects/:id" element={<ProjectDetailPage />} />
