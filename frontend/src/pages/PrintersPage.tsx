@@ -1,6 +1,15 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { compareFwVersions } from '../utils/firmwareVersion';
 import { formatPrintName } from '../utils/printName';
+import { computePopoverPosition } from '../utils/popoverPosition';
+
+// AMS drying popover dimensions — w-[240px] on the popover, estimated height
+// covers header + filament select + temp slider + duration + rotate-tray
+// toggle + buttons. Over-estimating is fine (flip-above kicks in slightly
+// earlier); under-estimating leaves the popover clipped off the bottom (the
+// original bug at #1447).
+const DRYING_POPOVER_WIDTH = 240;
+const DRYING_POPOVER_ESTIMATED_HEIGHT = 320;
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
@@ -784,6 +793,25 @@ function getAmsLabel(amsId: number | string, trayCount: number): string {
   const normalizedId = safeId >= 128 ? safeId - 128 : safeId;
   const letter = String.fromCharCode(65 + normalizedId); // 0=A, 1=B, 2=C, 3=D
   return isHt ? `HT-${letter}` : `AMS-${letter}`;
+}
+
+/** Classify an empty AMS slot for UI rendering (#1322 follow-up).
+ *
+ *  "physical" — firmware positively confirmed no spool (state 9 or 10). The
+ *  bambu_mqtt handler now promotes tray_exist_bits=0 slots to state=9, so
+ *  every empty-by-bitmask slot lands here regardless of firmware payload
+ *  shape.
+ *
+ *  "reset" — tray_type is missing/empty but firmware hasn't confirmed
+ *  emptiness (state is null, 3, or any non-9/10 value). Typically a slot
+ *  the user cleared with "Reset Slot" where a physical spool may still be
+ *  loaded but unassigned.
+ *
+ *  Returns null when the slot is loaded (tray_type is present).
+ */
+function getEmptySlotKind(tray: { tray_type?: string | null; state?: number | null } | null | undefined): 'physical' | 'reset' | null {
+  if (tray?.tray_type) return null;
+  return (tray?.state === 9 || tray?.state === 10) ? 'physical' : 'reset';
 }
 
 
@@ -3467,7 +3495,7 @@ function PrinterCard({
                                           setDryingPopoverModuleType(ams.module_type);
                                           setDryingPopoverAmsId(ams.id);
                                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                          setDryingPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 240) });
+                                          setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT }));
                                         }
                                       }}
                                       className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
@@ -3515,6 +3543,7 @@ function PrinterCard({
                                 const tray = ams.tray[slotIdx] || ams.tray.find(t => t.id === slotIdx);
                                 const hasFillLevel = tray?.tray_type && tray.remain >= 0;
                                 const isEmpty = !tray?.tray_type;
+                                const emptyKind = getEmptySlotKind(tray);
                                 // Check if this is the currently loaded tray
                                 // Global tray ID = ams.id * 4 + slot index (for standard AMS)
                                 const globalTrayId = ams.id * 4 + slotIdx;
@@ -3592,10 +3621,11 @@ function PrinterCard({
                                       trayColor={tray?.tray_color}
                                       trayType={tray?.tray_type}
                                       isEmpty={isEmpty}
+                                      emptyKind={emptyKind}
                                       slotNumber={slotIdx + 1}
                                     />
                                     <div className="text-[9px] text-white font-bold truncate">
-                                      {tray?.tray_type || '—'}
+                                      {tray?.tray_type || t('ams.slotEmpty')}
                                     </div>
                                     {/* Fill bar */}
                                     <div className="mt-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -3703,8 +3733,11 @@ function PrinterCard({
                                         data={filamentData}
                                         spoolman={{
                                           enabled: spoolmanEnabled,
-                                          linkedSpoolId: (trayTag ? linkedSpools?.[trayTag]?.id : undefined)
-                                            ?? slotAssignmentForFill?.spoolman_spool_id,
+                                          // #1457: slot assignment is the user's most explicit action — it must
+                                          // outrank the tag-link, which can be stale when a non-RFID slot's
+                                          // fallback tag is still attached to a previous spool in Spoolman.
+                                          linkedSpoolId: slotAssignmentForFill?.spoolman_spool_id
+                                            ?? (trayTag ? linkedSpools?.[trayTag]?.id : undefined),
                                           spoolmanUrl,
                                           syncMode: spoolmanSyncMode,
                                           // Suppress Link button when slot is already occupied by ANY assignment
@@ -3799,6 +3832,7 @@ function PrinterCard({
                                       </FilamentHoverCard>
                                     ) : (
                                       <EmptySlotHoverCard
+                                        kind={emptyKind ?? undefined}
                                         configureSlot={{
                                           enabled: hasPermission('printers:control'),
                                           onConfigure: () => setConfigureSlotModal({
@@ -3847,6 +3881,7 @@ function PrinterCard({
                         const tray = ams.tray[0];
                         const hasFillLevel = tray?.tray_type && tray.remain >= 0;
                         const isEmpty = !tray?.tray_type;
+                        const emptyKind = getEmptySlotKind(tray);
                         // Check if this is the currently loaded tray
                         const globalTrayId = getGlobalTrayId(ams.id, tray?.id ?? 0, false);
                         const isActive = effectiveTrayNow === globalTrayId;
@@ -3914,10 +3949,11 @@ function PrinterCard({
                               trayColor={tray?.tray_color}
                               trayType={tray?.tray_type}
                               isEmpty={isEmpty}
+                              emptyKind={emptyKind}
                               slotNumber={1}
                             />
                             <div className="text-[9px] text-white font-bold truncate">
-                              {tray?.tray_type || '—'}
+                              {tray?.tray_type || t('ams.slotEmpty')}
                             </div>
                             {/* Fill bar */}
                             <div className="mt-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -3975,7 +4011,7 @@ function PrinterCard({
                                         setDryingPopoverModuleType(ams.module_type);
                                         setDryingPopoverAmsId(ams.id);
                                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                        setDryingPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 240) });
+                                        setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT }));
                                       }
                                     }}
                                     className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
@@ -4101,8 +4137,9 @@ function PrinterCard({
                                     data={filamentData}
                                     spoolman={{
                                       enabled: spoolmanEnabled,
-                                      linkedSpoolId: (htTrayTag ? linkedSpools?.[htTrayTag]?.id : undefined)
-                                        ?? htSlotAssignmentForFill?.spoolman_spool_id,
+                                      // #1457: slot assignment outranks tag-link (see top-level slot block).
+                                      linkedSpoolId: htSlotAssignmentForFill?.spoolman_spool_id
+                                        ?? (htTrayTag ? linkedSpools?.[htTrayTag]?.id : undefined),
                                       spoolmanUrl,
                                       syncMode: spoolmanSyncMode,
                                       // Suppress Link button when slot is occupied by ANY assignment (Phase 13 P13-6d)
@@ -4194,6 +4231,7 @@ function PrinterCard({
                                   </FilamentHoverCard>
                                 ) : (
                                   <EmptySlotHoverCard
+                                    kind={emptyKind ?? undefined}
                                     configureSlot={{
                                       enabled: hasPermission('printers:control'),
                                       onConfigure: () => setConfigureSlotModal({
@@ -4322,6 +4360,7 @@ function PrinterCard({
                               };
 
                               const isEmpty = !extTray.tray_type;
+                              const emptyKind = getEmptySlotKind(extTray);
                               const extSlotContent = (
                                 <div className={`bg-bambu-dark-tertiary rounded p-1 text-center ${isEmpty ? 'opacity-50' : ''} ${isExtActive ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark' : ''}`}>
                                   {/* Filament color circle with 1-based slot number centered inside */}
@@ -4329,10 +4368,11 @@ function PrinterCard({
                                     trayColor={extTray.tray_color}
                                     trayType={extTray.tray_type}
                                     isEmpty={isEmpty}
+                                    emptyKind={emptyKind}
                                     slotNumber={slotTrayId + 1}
                                   />
                                   <div className={`text-[9px] font-bold truncate ${isEmpty ? 'text-white/40' : 'text-white'}`}>
-                                    {extTray.tray_type || '—'}
+                                    {extTray.tray_type || t('ams.slotEmpty')}
                                   </div>
                                   <div className="mt-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
                                     {extEffectiveFill !== null && extEffectiveFill >= 0 && !isEmpty && (
@@ -4413,8 +4453,9 @@ function PrinterCard({
                                       data={extFilamentData}
                                       spoolman={{
                                         enabled: spoolmanEnabled,
-                                        linkedSpoolId: (extTrayTag ? linkedSpools?.[extTrayTag]?.id : undefined)
-                                          ?? extSlotAssignmentForFill?.spoolman_spool_id,
+                                        // #1457: slot assignment outranks tag-link (see top-level slot block).
+                                        linkedSpoolId: extSlotAssignmentForFill?.spoolman_spool_id
+                                          ?? (extTrayTag ? linkedSpools?.[extTrayTag]?.id : undefined),
                                         spoolmanUrl,
                                         syncMode: spoolmanSyncMode,
                                         // Suppress Link button when slot is occupied by ANY assignment (Phase 13 P13-6d)
@@ -4506,6 +4547,7 @@ function PrinterCard({
                                     </FilamentHoverCard>
                                   ) : (
                                     <EmptySlotHoverCard
+                                      kind={emptyKind ?? undefined}
                                       configureSlot={{
                                         enabled: hasPermission('printers:control'),
                                         onConfigure: () => setConfigureSlotModal({

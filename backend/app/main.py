@@ -651,21 +651,23 @@ def _compute_run_filament_grams(
     progress: float | int | None,
     usage_results: list[dict] | None,
 ) -> float | None:
-    """Per-run filament for PrintLogEntry, partial-aware (#1378).
+    """Per-run filament for PrintLogEntry, partial- and tracker-aware (#1378, #1390).
 
-    For ``completed``: returns the archive's slicer estimate (which approximates
-    actual since the print finished). For failed / cancelled / stopped:
-        1. Sum of tracked spool deltas in ``usage_results`` (most accurate
-           when inventory is configured for the print).
-        2. ``estimate * progress%`` (when no inventory delta available).
-        3. ``None`` (no signal at all — e.g. progress=0 and no spool data).
+    Priority for every status:
+        1. Sum of tracked spool deltas in ``usage_results`` (AMS-measured
+           weight delta — same source that drives "Total Consumed" on the
+           Inventory page, so Stats and Inventory totals stay aligned).
+        2. For ``completed``: the slicer estimate (no tracker available, fall
+           back to the canonical "this print used X" value).
+        3. For partial statuses: ``estimate * progress%``.
+        4. ``None`` if nothing is known.
     """
-    if status == "completed":
-        return archive_filament_used_grams
-
     tracked_grams = sum(r.get("weight_used") or 0 for r in (usage_results or []))
     if tracked_grams > 0:
         return round(tracked_grams, 1)
+
+    if status == "completed":
+        return archive_filament_used_grams
 
     if archive_filament_used_grams:
         scale = max(0.0, min(((progress or 0) / 100.0), 1.0))
@@ -681,6 +683,31 @@ def _get_start_ams_mapping(data: dict, archive_id: int | None) -> list[int] | No
     if not stored_ams_mapping and archive_id:
         stored_ams_mapping = _print_ams_mappings.get(archive_id)
     return stored_ams_mapping
+
+
+def _maybe_start_layer_timelapse(printer, printer_id: int, archive_id: int) -> bool:
+    """Start a layer-timelapse session for *archive_id* when the printer has
+    an external camera configured. Returns True if a session was started.
+
+    Three call sites in on_print_start (expected-archive promotion, fallback
+    archive creation, fresh-archive creation) used to inline this same
+    if-block; the inline copies kept drifting (#1353 fixed only one of them
+    on the first pass). Centralising the conditional + call here makes the
+    contract testable in isolation and keeps the three sites locked in step.
+    """
+    if not (printer.external_camera_enabled and printer.external_camera_url):
+        return False
+    from backend.app.services.layer_timelapse import start_session
+
+    start_session(
+        printer_id,
+        archive_id,
+        printer.external_camera_url,
+        printer.external_camera_type or "mjpeg",
+        snapshot_url=printer.external_camera_snapshot_url,
+    )
+    logging.getLogger(__name__).info("Started layer timelapse for printer %s, archive %s", printer_id, archive_id)
+    return True
 
 
 def _format_hms_error_summary(hms_errors: list[dict]) -> str | None:
@@ -2111,6 +2138,15 @@ async def on_print_start(printer_id: int, data: dict):
                 archive.started_at = datetime.now(timezone.utc)
                 if subtask_id:
                     archive.subtask_id = subtask_id
+                # #1403 follow-up: VP-queue archives are created with
+                # printer_id=None at queue-add time (we don't know which
+                # printer will run the job yet). When the print actually
+                # starts on a specific printer the expected-archive lookup
+                # used to skip this assignment, leaving printer_id=None
+                # forever — which then disables the "Scan for timelapse"
+                # button in ArchivesPage (gated on !archive.printer_id).
+                if archive.printer_id != printer_id:
+                    archive.printer_id = printer_id
                 await db.commit()
 
                 # Track as active print
@@ -2119,22 +2155,10 @@ async def on_print_start(printer_id: int, data: dict):
                     _active_prints[(printer_id, f"{subtask_name}.3mf")] = archive.id
 
                 # Start timelapse session if external camera is enabled (#1353).
-                # The two new-archive paths below also call start_session, but
-                # queue / VP-dispatched prints land here in the expected-archive
-                # branch and used to skip it entirely — so the timelapse session
-                # never started, no frames were captured, and the post-print
-                # stitch silently returned None.
-                if printer.external_camera_enabled and printer.external_camera_url:
-                    from backend.app.services.layer_timelapse import start_session
-
-                    start_session(
-                        printer_id,
-                        archive.id,
-                        printer.external_camera_url,
-                        printer.external_camera_type or "mjpeg",
-                        snapshot_url=printer.external_camera_snapshot_url,
-                    )
-                    logger.info("Started layer timelapse for printer %s, expected archive %s", printer_id, archive.id)
+                # Queue / VP-dispatched prints land here in the expected-archive
+                # branch and used to skip start_session entirely — frames were
+                # never captured and the post-print stitch silently returned None.
+                _maybe_start_layer_timelapse(printer, printer_id, archive.id)
 
                 # Inject ams_mapping into usage tracker session — the session was created
                 # before expected-print promotion, so it may have ams_mapping=None when
@@ -2193,6 +2217,14 @@ async def on_print_start(printer_id: int, data: dict):
                     )
                 except Exception as e:
                     logger.warning("[SPOOLMAN] Failed to store tracking data: %s", e)
+
+                # Capture timelapse file baseline for snapshot-diff on completion
+                # (mirrors the new-archive branch). Queue / VP-dispatched prints
+                # hit this branch — without the baseline the completion-time scan
+                # falls into its "take baseline now" fallback, which snapshots
+                # AFTER the new MP4 already exists and never matches a diff
+                # (#1403 follow-up — see pwostran's 2026-05-18 support bundle).
+                await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
 
             return  # Skip creating a new archive
 
@@ -2648,18 +2680,7 @@ async def on_print_start(printer_id: int, data: dict):
 
                 logger.info("Created fallback archive %s for %s (no 3MF available)", fallback_archive.id, print_name)
 
-                # Start timelapse session if external camera is enabled
-                if printer.external_camera_enabled and printer.external_camera_url:
-                    from backend.app.services.layer_timelapse import start_session
-
-                    start_session(
-                        printer_id,
-                        fallback_archive.id,
-                        printer.external_camera_url,
-                        printer.external_camera_type or "mjpeg",
-                        snapshot_url=printer.external_camera_snapshot_url,
-                    )
-                    logger.info("Started layer timelapse for printer %s, archive %s", printer_id, fallback_archive.id)
+                _maybe_start_layer_timelapse(printer, printer_id, fallback_archive.id)
 
                 # Track as active print
                 _active_prints[(printer_id, fallback_archive.filename)] = fallback_archive.id
@@ -2738,18 +2759,7 @@ async def on_print_start(printer_id: int, data: dict):
 
                 logger.info("Created archive %s for %s", archive.id, downloaded_filename)
 
-                # Start timelapse session if external camera is enabled
-                if printer.external_camera_enabled and printer.external_camera_url:
-                    from backend.app.services.layer_timelapse import start_session
-
-                    start_session(
-                        printer_id,
-                        archive.id,
-                        printer.external_camera_url,
-                        printer.external_camera_type or "mjpeg",
-                        snapshot_url=printer.external_camera_snapshot_url,
-                    )
-                    logger.info("Started layer timelapse for printer %s, archive %s", printer_id, archive.id)
+                _maybe_start_layer_timelapse(printer, printer_id, archive.id)
 
                 # Record starting energy from smart plug if available (#941: persisted column)
                 await _record_energy_start(archive, printer_id, db, context="auto-archive")
@@ -2820,16 +2830,7 @@ async def on_print_start(printer_id: int, data: dict):
                     logger.warning("[SPOOLMAN] Failed to store tracking data: %s", e)
 
                 # Capture timelapse file baseline for snapshot-diff on completion
-                try:
-                    baseline_files, _ = await _list_timelapse_videos(printer)
-                    _timelapse_baselines[printer_id] = {f.get("name", "") for f in baseline_files}
-                    logger.info(
-                        "[TIMELAPSE] Baseline at print start: %s video files for printer %s",
-                        len(_timelapse_baselines[printer_id]),
-                        printer_id,
-                    )
-                except Exception as e:
-                    logger.warning("[TIMELAPSE] Failed to capture baseline at print start: %s", e)
+                await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
         finally:
             # Keep temp_path around until print completes so the cover endpoint
             # can reuse it (#972). Cache eviction in on_print_complete deletes
@@ -2872,6 +2873,32 @@ async def _list_timelapse_videos(printer) -> tuple[list[dict], str | None]:
             continue
 
     return [], None
+
+
+async def _capture_timelapse_baseline_at_start(printer, printer_id: int, logger: logging.Logger) -> None:
+    """Snapshot the printer's timelapse directory at print start so the
+    completion-time scan can pick the new file by set-difference.
+
+    Must be called from every on_print_start path that proceeds to a real
+    print — both the new-archive branch and the expected-archive branch (which
+    queue / VP-dispatched prints take). Without a baseline,
+    _scan_for_timelapse_with_retries falls into its "take baseline now"
+    fallback that runs AFTER the new MP4 has already landed on the SD card,
+    so the new file ends up in the "baseline" set and no diff ever matches.
+
+    Bambu printers in LAN-only mode don't sync NTP, so mtime ordering is
+    unreliable — the snapshot-diff approach sidesteps that entirely.
+    """
+    try:
+        baseline_files, _ = await _list_timelapse_videos(printer)
+        _timelapse_baselines[printer_id] = {f.get("name", "") for f in baseline_files}
+        logger.info(
+            "[TIMELAPSE] Baseline at print start: %s video files for printer %s",
+            len(_timelapse_baselines[printer_id]),
+            printer_id,
+        )
+    except Exception as e:
+        logger.warning("[TIMELAPSE] Failed to capture baseline at print start: %s", e)
 
 
 async def _scan_for_timelapse_with_retries(archive_id: int, baseline_names: set[str] | None = None):

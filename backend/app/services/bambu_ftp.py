@@ -35,15 +35,20 @@ class ImplicitFTP_TLS(FTP_TLS):
     A1/A1 Mini printers have issues with SSL on the data channel entirely and
     timeout waiting for transfer completion. Set skip_session_reuse=True for A1
     printers to skip SSL on the data channel (control channel remains encrypted).
+
+    Optionally caps the SSL context's maximum TLS version to v1.2 (P2S firmware
+    01.02.00.00 needs this — see :mod:`ftp_profiles` and #1401).
     """
 
-    def __init__(self, *args, skip_session_reuse: bool = False, **kwargs):
+    def __init__(self, *args, skip_session_reuse: bool = False, cap_tls_v1_2: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self._sock = None
         self.skip_session_reuse = skip_session_reuse
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
+        if cap_tls_v1_2:
+            self.ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
 
     def connect(self, host="", port=990, timeout=-999, source_address=None):
         """Connect to host, wrapping socket in TLS immediately (implicit FTPS)."""
@@ -150,11 +155,18 @@ class BambuFTPClient:
         """Connect to the printer FTP server (implicit FTPS on port 990)."""
         try:
             use_prot_c = self._should_use_prot_c()
+            from backend.app.services.ftp_profiles import get_ftp_profile
+
+            profile = get_ftp_profile(self.printer_model)
             logger.debug(
                 f"FTP connecting to {self.ip_address}:{self.FTP_PORT} "
-                f"(timeout={self.timeout}s, model={self.printer_model}, prot_c={use_prot_c})"
+                f"(timeout={self.timeout}s, model={self.printer_model}, prot_c={use_prot_c}, "
+                f"cap_tls_v1_2={profile.cap_tls_v1_2})"
             )
-            self._ftp = ImplicitFTP_TLS(skip_session_reuse=use_prot_c)
+            self._ftp = ImplicitFTP_TLS(
+                skip_session_reuse=use_prot_c,
+                cap_tls_v1_2=profile.cap_tls_v1_2,
+            )
             self._ftp.connect(self.ip_address, self.FTP_PORT, timeout=self.timeout)
             logger.debug("FTP connected, logging in as bblp")
             self._ftp.login("bblp", self.access_code)
@@ -448,18 +460,40 @@ class BambuFTPClient:
                 finally:
                     self._ftp.sock.settimeout(old_timeout)
             except ftplib.Error as e:
-                # The printer's FTP server explicitly told us the transfer
-                # failed (e.g. 426 "Failure reading network stream" seen on
-                # some P2S firmware revisions). The file on the SD card is
-                # truncated — never report success or send a print command
-                # for it. Re-raise so the outer handler returns False.
-                logger.error(
-                    "FTP STOR rejected by printer for %s: %s (%s)",
-                    remote_path,
-                    e,
-                    type(e).__name__,
-                )
-                raise
+                # Some P2S firmware revisions return ftplib.Error (e.g. 426
+                # "Failure reading network stream") on voidresp() even when
+                # the file landed fully on the SD card — the TLS data
+                # channel close races the 226 confirmation (#1417 follow-up).
+                # Verify via SIZE: if the server-side file size matches what
+                # we just uploaded, the file is intact and we proceed with
+                # a warning. If not — or SIZE itself fails — the transfer
+                # was genuinely truncated and we must fail so the print
+                # command doesn't go out for a partial 3MF (the original
+                # reason this catch was tightened in the previous round).
+                try:
+                    server_size = self._ftp.size(remote_path)
+                except (OSError, ftplib.Error) as size_err:
+                    logger.debug("Post-error SIZE check failed: %s", size_err)
+                    server_size = None
+                if server_size is not None and server_size == file_size:
+                    logger.warning(
+                        "FTP STOR returned %s for %s but file is intact on the "
+                        "printer (%s bytes match) — proceeding: %s",
+                        type(e).__name__,
+                        remote_path,
+                        file_size,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "FTP STOR rejected by printer for %s: %s (%s); server size=%s expected=%s",
+                        remote_path,
+                        e,
+                        type(e).__name__,
+                        server_size,
+                        file_size,
+                    )
+                    raise
             except Exception as e:
                 # Timeout or socket-level error reading 226 — the data was sent
                 # on our side and the printer may still have written the file.
@@ -554,13 +588,33 @@ class BambuFTPClient:
                 finally:
                     self._ftp.sock.settimeout(old_timeout)
             except ftplib.Error as e:
-                logger.error(
-                    "FTP STOR rejected by printer for %s: %s (%s)",
-                    remote_path,
-                    e,
-                    type(e).__name__,
-                )
-                return False
+                # Same SIZE-verify path as upload_file (#1417 follow-up):
+                # tolerate a transient 426 if the bytes are actually on the
+                # printer, fail loudly if they aren't.
+                try:
+                    server_size = self._ftp.size(remote_path)
+                except (OSError, ftplib.Error) as size_err:
+                    logger.debug("Post-error SIZE check failed: %s", size_err)
+                    server_size = None
+                if server_size is not None and server_size == len(data):
+                    logger.warning(
+                        "FTP STOR returned %s for %s but file is intact on the "
+                        "printer (%s bytes match) — proceeding: %s",
+                        type(e).__name__,
+                        remote_path,
+                        len(data),
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "FTP STOR rejected by printer for %s: %s (%s); server size=%s expected=%s",
+                        remote_path,
+                        e,
+                        type(e).__name__,
+                        server_size,
+                        len(data),
+                    )
+                    return False
             except Exception:
                 pass  # Timeout / socket-level — proceed, data was sent.
             return True

@@ -918,6 +918,12 @@ class BambuMQTTClient:
                 logger.debug("[%s] Received command response: %s", self.serial_number, cmd)
                 if cmd in ("extrusion_cali_sel", "extrusion_cali_set", "extrusion_cali_del", "ams_filament_setting"):
                     logger.debug("[%s] %s response: %s", self.serial_number, cmd, print_data)
+                # AMS drying responses are rare (user-initiated only) and the
+                # full payload — including `result` and any `reason` code —
+                # is the only way to diagnose silent rejections like #1447.
+                # INFO level so the body lands in support bundles by default.
+                elif cmd == "ams_filament_drying":
+                    logger.info("[%s] ams_filament_drying response: %s", self.serial_number, print_data)
                 # Check for developer mode probe response
                 if (
                     cmd == "ams_filament_setting"
@@ -1756,20 +1762,36 @@ class BambuMQTTClient:
                         tray_id = int(tray_id_raw) if isinstance(tray_id_raw, str) else tray_id_raw
                         global_bit = ams_id * 4 + tray_id
                         slot_exists = (tray_exist_bits >> global_bit) & 1
-                        if not slot_exists and tray.get("tray_type"):
-                            # Slot is marked empty but has data - clear it
-                            logger.debug(
-                                f"[{self.serial_number}] Clearing empty slot: AMS {ams_id} slot {tray_id} "
-                                f"(tray_exist_bits bit {global_bit} = 0)"
-                            )
-                            tray["tray_type"] = ""
-                            tray["tray_sub_brands"] = ""
-                            tray["tray_color"] = ""
-                            tray["tray_id_name"] = ""
-                            tray["tag_uid"] = "0000000000000000"
-                            tray["tray_uuid"] = "00000000000000000000000000000000"
-                            tray["tray_info_idx"] = ""
-                            tray["remain"] = 0
+                        if not slot_exists:
+                            # #1322 follow-up (by @RosdasHH): the bitmask is
+                            # BambuStudio's canonical "no spool" signal, and
+                            # works across every firmware variant (P1S, A1
+                            # Mini, post-restart, post-Reset-Slot, steady-
+                            # state). Promote to state=9 (firmware's
+                            # explicit "no spool" code) so downstream
+                            # readers — printers.py's API serializer,
+                            # inventory.py's `tray_state in {9, 10}`
+                            # short-circuit, the AMS card — see one
+                            # canonical signal instead of guessing from
+                            # payload shape. Int (not "9") to match the
+                            # downstream `==` comparison.
+                            tray["state"] = 9
+                            if tray.get("tray_type"):
+                                # Stale data from before the slot went empty
+                                # — clear it so the AMS view doesn't render a
+                                # colour/material that's no longer there.
+                                logger.debug(
+                                    f"[{self.serial_number}] Clearing empty slot: AMS {ams_id} slot {tray_id} "
+                                    f"(tray_exist_bits bit {global_bit} = 0)"
+                                )
+                                tray["tray_type"] = ""
+                                tray["tray_sub_brands"] = ""
+                                tray["tray_color"] = ""
+                                tray["tray_id_name"] = ""
+                                tray["tag_uid"] = "0000000000000000"
+                                tray["tray_uuid"] = "00000000000000000000000000000000"
+                                tray["tray_info_idx"] = ""
+                                tray["remain"] = 0
 
         self.state.raw_data["ams"] = merged_ams
 
@@ -3687,14 +3709,17 @@ class BambuMQTTClient:
                 "close_power_conflict": False,
             }
         }
-        self._client.publish(self.topic_publish, json.dumps(command), qos=1)
+        # Log the full wire JSON at INFO so support bundles capture exactly
+        # what we sent — needed to diagnose silent rejections (#1447) where
+        # the printer ACKs the command but never starts/stops drying.
+        # Paired with the ams_filament_drying response-payload INFO log so
+        # both halves of the conversation land in the bundle by default.
+        wire_json = json.dumps(command)
+        self._client.publish(self.topic_publish, wire_json, qos=1)
         logger.info(
-            "[%s] Sent drying command: ams_id=%d, temp=%d, duration=%d, mode=%d",
+            "[%s] Sent ams_filament_drying: %s",
             self.serial_number,
-            ams_id,
-            temp,
-            duration,
-            mode,
+            wire_json,
         )
         return True
 
