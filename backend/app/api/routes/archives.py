@@ -32,9 +32,9 @@ from backend.app.services.archive import ArchiveService
 from backend.app.services.finance_budget import validate_print_budget
 from backend.app.utils.http import build_content_disposition
 from backend.app.utils.threemf_tools import (
+    extract_embedded_presets_from_3mf,
     extract_nozzle_mapping_from_3mf,
     extract_project_filaments_from_3mf,
-    extract_source_printer_model_from_3mf,
 )
 
 logger = logging.getLogger(__name__)
@@ -866,9 +866,22 @@ async def get_archive_stats(
     successful_prints = successful_result.scalar() or 0
 
     failed_result = await db.execute(
-        select(func.count(PrintLogEntry.id)).where(PrintLogEntry.status == "failed", *base_conditions)
+        select(func.count(PrintLogEntry.id)).where(PrintLogEntry.status.in_(("failed", "aborted")), *base_conditions)
     )
     failed_prints = failed_result.scalar() or 0
+
+    # User/system-stopped prints — stopped/cancelled/skipped are distinct from
+    # quality failures: the user (or the queue) interrupted them, the printer
+    # didn't detect a fault. Bucketed separately so the Success Rate gauge
+    # divides by completed + failed only (a cancelled print shouldn't drag
+    # the gauge down), while still being visible in the breakdown so they
+    # don't silently vanish from Total Prints (#1390).
+    cancelled_result = await db.execute(
+        select(func.count(PrintLogEntry.id)).where(
+            PrintLogEntry.status.in_(("stopped", "cancelled", "skipped")), *base_conditions
+        )
+    )
+    cancelled_prints = cancelled_result.scalar() or 0
 
     # Total elapsed time — PrintLogEntry stores duration_seconds directly so we
     # can sum it server-side. Rows missing duration fall back to the slicer
@@ -991,6 +1004,7 @@ async def get_archive_stats(
         total_prints=total_prints,
         successful_prints=successful_prints,
         failed_prints=failed_prints,
+        cancelled_prints=cancelled_prints,
         total_print_time_hours=round(total_time, 1),
         total_filament_grams=round(total_filament, 1),
         total_cost=round(total_cost, 2),
@@ -3072,10 +3086,14 @@ async def get_archive_plates(
     # never raises NameError when the archive isn't a valid zip (e.g. plain
     # .gcode file from a sliced-archive flow that didn't request 3MF output).
     gcode_files: list[str] = []
+    # Printer / process preset names the 3MF was prepared with — used by the
+    # SliceModal to default its dropdowns (#1325).
+    embedded_presets: dict[str, str | None] = {"printer": None, "process": None}
 
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
             namelist = zf.namelist()
+            embedded_presets = extract_embedded_presets_from_3mf(zf)
 
             # Find all plate gcode files to determine available plates
             gcode_files = [n for n in namelist if n.startswith("Metadata/plate_") and n.endswith(".gcode")]
@@ -3317,20 +3335,14 @@ async def get_archive_plates(
     # to preview gcode — the viewer, skip-objects — can gate on this instead of
     # 404-ing on every plate request.
     has_gcode = bool(gcode_files)
-    # SliceModal pre-check signal — see library.py for rationale.
-    source_printer_model: str | None = None
-    try:
-        with zipfile.ZipFile(file_path, "r") as zf:
-            source_printer_model = extract_source_printer_model_from_3mf(zf)
-    except (zipfile.BadZipFile, OSError):
-        pass
     return {
         "archive_id": archive_id,
         "filename": archive.filename,
         "plates": plates,
         "is_multi_plate": len(plates) > 1,
         "has_gcode": has_gcode,
-        "source_printer_model": source_printer_model,
+        "embedded_printer": embedded_presets["printer"],
+        "embedded_process": embedded_presets["process"],
     }
 
 
@@ -3610,7 +3622,7 @@ async def slice_archive(
     user originally sent to slice) → ``file_path`` (the sliced 3MF/gcode that
     actually printed).
     """
-    from backend.app.api.routes.library import slice_and_persist_as_archive
+    from backend.app.api.routes.library import guard_nozzle_class_reslice, slice_and_persist_as_archive
     from backend.app.core.database import async_session
     from backend.app.services.slice_dispatch import (
         http_exception_to_job_error,
@@ -3656,6 +3668,11 @@ async def slice_archive(
     model_bytes = src_path.read_bytes()
     archive_id_local = archive.id
     user_id = current_user.id if current_user else None
+
+    # Block a cross-nozzle-class re-slice (single-nozzle <-> H2D) up front —
+    # BambuStudio's multi-extruder validator would otherwise reject it with a
+    # cryptic error. No-op for same-class or un-sliced sources.
+    await guard_nozzle_class_reslice(db, current_user, request, archive.sliced_for_model)
 
     async def _run(job_id: int):
         async with async_session() as task_db:
@@ -3896,6 +3913,51 @@ async def get_project_image(
 # =============================================================================
 
 
+def _resolve_source_3mf_path(archive: PrintArchive, source_filename: str) -> Path:
+    """Resolve where to write a source 3MF for ``archive``.
+
+    Normal archives nest the source under ``<archive_file_dir>/source/``.
+    "Fallback" archives (created in main.py when MQTT reports a print start
+    but Bambuddy never saw the source 3MF — cloud / Handy / pre-existing
+    SD-card prints) carry ``file_path=""``. Joining that with ``base_dir``
+    via the ``/`` operator silently yields ``base_dir`` itself, whose parent
+    is ``base_dir.parent`` — which sent the upload to ``/app/source/`` and
+    raised a 500 on the final ``relative_to`` (#1531). Fallback archives
+    now land under ``<base_dir>/archive/no_source/<archive_id>/`` instead,
+    which stays inside the data volume and remains addressable by every
+    read site that does ``base_dir / archive.source_3mf_path``.
+
+    The resolved directory is asserted to be inside ``base_dir`` even when
+    ``archive.file_path`` is populated, so a row corrupted by an old import
+    or manual SQL edit fails with a clear 500 instead of writing outside
+    the data volume.
+    """
+    if archive.file_path:
+        archive_file = settings.base_dir / archive.file_path
+        source_dir = archive_file.parent / "source"
+    else:
+        source_dir = settings.base_dir / "archive" / "no_source" / str(archive.id)
+
+    # Containment check via resolve() — catches absolute file_path, `..`
+    # traversal, and any other shape that escapes the data volume — but we
+    # return the *literal* source_dir below. Resolving the returned path
+    # would canonicalise away a symlinked DATA_DIR (legitimate on TrueNAS /
+    # QNAP / Synology storage pools, and any `-v /symlink:/app/data`
+    # mount), which would then make the caller's
+    # ``source_path.relative_to(settings.base_dir)`` raise because the
+    # left side is canonical and the right is the symlink path.
+    try:
+        source_dir.resolve().relative_to(settings.base_dir.resolve())
+    except ValueError as exc:
+        raise HTTPException(
+            500,
+            f"Archive {archive.id} resolves to a path outside the data directory; cannot attach source.",
+        ) from exc
+
+    source_dir.mkdir(parents=True, exist_ok=True)
+    return source_dir / source_filename
+
+
 @router.post("/{archive_id}/source")
 async def upload_source_3mf(
     archive_id: int,
@@ -3912,21 +3974,15 @@ async def upload_source_3mf(
     if not file.filename or not file.filename.endswith(".3mf"):
         raise HTTPException(400, "File must be a .3mf file")
 
-    # Get archive directory and create source subdirectory
-    file_path = settings.base_dir / archive.file_path
-    archive_dir = file_path.parent
-    source_dir = archive_dir / "source"
-    source_dir.mkdir(exist_ok=True)
+    # Save the source 3MF file - preserve original filename, strip directory components
+    source_filename = _safe_filename(file.filename)
+    source_path = _resolve_source_3mf_path(archive, source_filename)
 
     # Delete old source file if exists
     if archive.source_3mf_path:
         old_source_path = settings.base_dir / archive.source_3mf_path
         if old_source_path.exists():
             old_source_path.unlink()
-
-    # Save the source 3MF file - preserve original filename, strip directory components
-    source_filename = _safe_filename(file.filename)
-    source_path = source_dir / source_filename
 
     content = await file.read()
     # #1401: validate zip header on source 3MF uploads too — source files
@@ -4119,21 +4175,15 @@ async def upload_source_3mf_by_name(
     if not archive:
         raise HTTPException(404, f"No archive found matching '{print_name}'")
 
-    # Get archive directory and create source subdirectory
-    file_path = settings.base_dir / archive.file_path
-    archive_dir = file_path.parent
-    source_dir = archive_dir / "source"
-    source_dir.mkdir(exist_ok=True)
+    # Save the source 3MF file - preserve original filename, strip directory components
+    source_filename = safe_filename
+    source_path = _resolve_source_3mf_path(archive, source_filename)
 
     # Delete old source file if exists
     if archive.source_3mf_path:
         old_source_path = settings.base_dir / archive.source_3mf_path
         if old_source_path.exists():
             old_source_path.unlink()
-
-    # Save the source 3MF file - preserve original filename, strip directory components
-    source_filename = safe_filename
-    source_path = source_dir / source_filename
 
     content = await file.read()
     # #1401: same zip-header check as the other upload routes — the

@@ -385,6 +385,7 @@ async def _report_spool_usage_for_slots(
     method_label: str,
     printer_serial: str = "",
     printer_id: int | None = None,
+    slot_colors_out: dict[int, str] | None = None,
 ) -> int:
     """Report usage to Spoolman for a list of (slot_id, grams) pairs.
 
@@ -394,6 +395,11 @@ async def _report_spool_usage_for_slots(
     tray_id). Without (2), tag-less spools assigned via the Bambuddy UI
     never get their weight decremented because their extra.tag is empty
     on the Spoolman side.
+
+    When ``slot_colors_out`` is provided it is populated with
+    ``{slot_id: color_hex}`` for every resolved spool — used by
+    :func:`report_usage` to stamp the archive's filament colour from the
+    Spoolman spool rather than the slicer's 3MF value (#1494).
 
     Returns number of spools successfully updated.
     """
@@ -420,6 +426,10 @@ async def _report_spool_usage_for_slots(
 
         spool_id_to_use: int | None = None
         resolution_path = ""
+        # color_hex of the resolved spool's filament, for the #1494 archive
+        # colour rewrite. The tag path already has the full spool object;
+        # the slot-assignment path only yields an id and is fetched below.
+        spool_color_hex: str | None = None
 
         spool_tag = _resolve_spool_tag(tray_info, printer_serial, global_tray_id)
         if spool_tag:
@@ -427,6 +437,7 @@ async def _report_spool_usage_for_slots(
             if spool:
                 spool_id_to_use = spool["id"]
                 resolution_path = "tag"
+                spool_color_hex = (spool.get("filament") or {}).get("color_hex")
 
         if spool_id_to_use is None and printer_id is not None:
             ams_id, tray_id = _global_tray_id_to_ams_slot(global_tray_id)
@@ -441,6 +452,20 @@ async def _report_spool_usage_for_slots(
                 spool_tag[:16] if spool_tag else "none",
             )
             continue
+
+        # Record the spool's filament colour for the archive rewrite (#1494).
+        # The slot-assignment path resolved only an id, so fetch the spool.
+        # Strictly best-effort: a colour-fetch failure must never abort the
+        # weight reporting for the remaining slots, so the catch is broad.
+        if slot_colors_out is not None:
+            if spool_color_hex is None:
+                try:
+                    full_spool = await client.get_spool(spool_id_to_use)
+                    spool_color_hex = (full_spool.get("filament") or {}).get("color_hex")
+                except Exception as exc:  # noqa: BLE001 — colour is non-critical
+                    logger.debug("[SPOOLMAN] Slot %s: could not fetch spool colour: %s", slot_id, exc)
+            if spool_color_hex:
+                slot_colors_out[slot_id] = spool_color_hex
 
         try:
             await client.use_spool(spool_id_to_use, grams_used)
@@ -675,6 +700,7 @@ async def report_usage(printer_id: int, archive_id: int):
         logger.info("[SPOOLMAN] Reporting per-filament usage for archive %s", archive_id)
 
         usage_items = [(u.get("slot_id", 0), u.get("used_g", 0)) for u in filament_usage]
+        slot_colors: dict[int, str] = {}
         spools_updated = await _report_spool_usage_for_slots(
             client,
             usage_items,
@@ -683,9 +709,58 @@ async def report_usage(printer_id: int, archive_id: int):
             f"Archive {archive_id}",
             printer_serial,
             printer_id=printer_id,
+            slot_colors_out=slot_colors,
         )
 
         if spools_updated == 0:
             logger.info("[SPOOLMAN] Archive %s: no spools updated", archive_id)
         else:
             logger.info("[SPOOLMAN] Archive %s: updated %s spool(s)", archive_id, spools_updated)
+
+        # Stamp the archive's filament colour from the matched Spoolman spools
+        # so it reflects the curated inventory colour, not the slicer's 3MF
+        # value (#1494) — mirrors the built-in inventory path in usage_tracker.
+        await _apply_spool_colors_to_archive(db, archive_id, filament_usage, slot_colors)
+
+
+async def _apply_spool_colors_to_archive(
+    db,
+    archive_id: int,
+    filament_usage: list[dict],
+    slot_colors: dict[int, str],
+) -> None:
+    """Overwrite an archive's ``filament_color`` with the colours of the
+    Spoolman spools that fed the print (#1494).
+
+    All-or-nothing, exactly like the built-in inventory path: the colour is
+    only rewritten when every used slot resolved to a spool that carries a
+    colour, so a partial match never drops slots from the archive.
+    """
+    if not slot_colors:
+        return
+
+    from backend.app.models.archive import PrintArchive
+    from backend.app.services.usage_tracker import (
+        _archive_colors_from_spools,
+        _spool_color_to_hex,
+    )
+
+    results = [{"slot_id": sid, "color": _spool_color_to_hex(hex_)} for sid, hex_ in slot_colors.items()]
+    colors = _archive_colors_from_spools(filament_usage, results)
+    if not colors:
+        return
+
+    archive = (await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))).scalar_one_or_none()
+    if archive is None:
+        return
+
+    joined = ",".join(colors)
+    if joined != archive.filament_color:
+        logger.info(
+            "[SPOOLMAN] Archive %s filament_color %r -> %r (from Spoolman spools)",
+            archive_id,
+            archive.filament_color,
+            joined,
+        )
+        archive.filament_color = joined
+        await db.commit()

@@ -35,6 +35,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.finance_budget import create_budget_reservation, release_budget_reservation
 from backend.app.services.printer_manager import printer_manager
+from backend.app.utils.filename import derive_remote_filename
 
 logger = logging.getLogger(__name__)
 
@@ -625,14 +626,7 @@ class BackgroundDispatchService:
             if not file_path.exists():
                 raise RuntimeError("Archive file not found")
 
-            base_name = archive.filename
-            if base_name.endswith(".gcode.3mf"):
-                base_name = base_name[:-10]
-            elif base_name.endswith(".3mf"):
-                base_name = base_name[:-4]
-            remote_filename = f"{base_name}.3mf"
-            # Sanitize: firmware parses ftp://{filename} as a URL, spaces break it
-            remote_filename = remote_filename.replace(" ", "_")
+            remote_filename = derive_remote_filename(archive.filename)
             remote_path = f"/{remote_filename}"
 
             ftp_retry_enabled, ftp_retry_count, ftp_retry_delay, ftp_timeout = await get_ftp_retry_settings()
@@ -840,14 +834,7 @@ class BackgroundDispatchService:
                     reservation.print_archive_id = archive.id
                     await db.flush()
 
-            base_name = lib_file.filename
-            if base_name.endswith(".gcode.3mf"):
-                base_name = base_name[:-10]
-            elif base_name.endswith(".3mf"):
-                base_name = base_name[:-4]
-            remote_filename = f"{base_name}.3mf"
-            # Sanitize: firmware parses ftp://{filename} as a URL, spaces break it
-            remote_filename = remote_filename.replace(" ", "_")
+            remote_filename = derive_remote_filename(lib_file.filename)
             remote_path = f"/{remote_filename}"
 
             ftp_retry_enabled, ftp_retry_count, ftp_retry_delay, ftp_timeout = await get_ftp_retry_settings()

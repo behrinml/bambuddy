@@ -3,6 +3,7 @@ import logging
 import mimetypes as _mimetypes
 import os
 import posixpath
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -683,6 +684,74 @@ def _get_start_ams_mapping(data: dict, archive_id: int | None) -> list[int] | No
     if not stored_ams_mapping and archive_id:
         stored_ams_mapping = _print_ams_mappings.get(archive_id)
     return stored_ams_mapping
+
+
+def _extract_filament_data_from_mqtt(data: dict, ams_mapping: list[int] | None = None) -> dict[str, str]:
+    """Best-effort filament metadata from the MQTT print-start snapshot.
+
+    Used when the 3MF can't be downloaded (P1S/A1/P2S firmwares lock the
+    file during print, see #1533) so the fallback PrintArchive still has
+    enough filament info to support the inventory views and AMS-expansion
+    planning the operator opens it for. Returns a dict with optional
+    ``filament_type`` and ``filament_color`` keys in the same
+    comma-separated format the 3MF extractor produces, so the rest of the
+    codebase treats the fallback archive identically to a normal one.
+
+    ``ams_mapping`` is the slicer's slot-per-print-filament list captured
+    from the MQTT print payload (global tray IDs, possibly -1 for VT-tray
+    entries). When supplied, only the slots actually consumed by this
+    print contribute. Without it the function falls back to every loaded
+    AMS slot — less accurate but still useful.
+    """
+    result: dict[str, str] = {}
+    ams_root = (data or {}).get("ams") or {}
+    ams_units = ams_root.get("ams") if isinstance(ams_root, dict) else None
+    if not isinstance(ams_units, list) or not ams_units:
+        return result
+
+    # Map global tray id (unit * 4 + tray) → (type, color).
+    loaded: dict[int, tuple[str, str]] = {}
+    for unit in ams_units:
+        if not isinstance(unit, dict):
+            continue
+        try:
+            unit_id = int(unit.get("id", 0))
+        except (TypeError, ValueError):
+            continue
+        for tray in unit.get("tray") or []:
+            if not isinstance(tray, dict):
+                continue
+            try:
+                tray_id = int(tray.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            ttype = (tray.get("tray_type") or "").strip()
+            tcolor = (tray.get("tray_color") or "").strip().upper()
+            if not ttype:
+                continue  # Empty / unloaded slot.
+            loaded[unit_id * 4 + tray_id] = (ttype, tcolor)
+
+    if not loaded:
+        return result
+
+    if ams_mapping:
+        used_ids = [int(x) for x in ams_mapping if isinstance(x, (int, float)) and int(x) >= 0]
+        filaments = [loaded[g] for g in used_ids if g in loaded]
+        if not filaments:
+            return result  # Mapping points entirely at slots we have no data for.
+    else:
+        filaments = [loaded[g] for g in sorted(loaded.keys())]
+
+    types_joined = ",".join(f[0] for f in filaments)
+    colors_joined = ",".join(f[1] for f in filaments if f[1])
+
+    # Column limits per backend/app/models/archive.py: filament_type=50,
+    # filament_color=200.
+    if types_joined:
+        result["filament_type"] = types_joined[:50]
+    if colors_joined:
+        result["filament_color"] = colors_joined[:200]
+    return result
 
 
 def _maybe_start_layer_timelapse(printer, printer_id: int, archive_id: int) -> bool:
@@ -2136,8 +2205,23 @@ async def on_print_start(printer_id: int, data: dict):
                 # Update archive status to printing
                 archive.status = "printing"
                 archive.started_at = datetime.now(timezone.utc)
-                if subtask_id:
-                    archive.subtask_id = subtask_id
+                # Persist a restart-stable id so a later restart resumes this
+                # archive by subtask_id instead of name-matching + duplicating
+                # it (#1485). The printer often hasn't echoed subtask_id back
+                # this soon after dispatch, so fall back to the id Bambuddy
+                # minted when it sent the print command. Scoped to this
+                # expected-print branch on purpose: an expected match means
+                # Bambuddy dispatched this exact print in this process, so the
+                # client's last-dispatch id genuinely belongs to it — using it
+                # for an externally-started print could mis-tag the archive.
+                effective_subtask_id = subtask_id
+                if not effective_subtask_id:
+                    _client = printer_manager.get_client(printer_id)
+                    _dispatched = getattr(_client, "last_dispatch_subtask_id", None) if _client else None
+                    if _dispatched:
+                        effective_subtask_id = str(_dispatched).strip() or None
+                if effective_subtask_id and not archive.subtask_id:
+                    archive.subtask_id = effective_subtask_id
                 # #1403 follow-up: VP-queue archives are created with
                 # printer_id=None at queue-add time (we don't know which
                 # printer will run the job yet). When the print actually
@@ -2305,18 +2389,31 @@ async def on_print_start(printer_id: int, data: dict):
                 _load_objects_from_archive(existing_archive, printer_id, logger)
                 return
 
-            # Name-match only: fall back to the legacy 4h staleness heuristic.
+            # Name-match only (no subtask_id to anchor on): decide resume vs.
+            # stale from the printer's *current* progress, not wall-clock age.
+            # A genuinely long print used to trip a blind 4h cutoff and have its
+            # live archive cancelled + duplicated on every backend restart
+            # (#1485). If the printer reports real progress, this name-matched
+            # 'printing' archive IS that ongoing print — resume it whatever its
+            # age. Only treat it as a stale leftover when the printer clearly
+            # shows a different, freshly-started print: near-0% progress on an
+            # archive far too old to still be at 0%. Unknown progress (printer
+            # not connected) never cancels — resuming is the safe default.
             archive_age = datetime.now(timezone.utc) - existing_archive.created_at.replace(tzinfo=timezone.utc)
-            if archive_age.total_seconds() > 4 * 60 * 60:  # 4 hours
+            live_status = printer_manager.get_status(printer_id)
+            live_progress = getattr(live_status, "progress", None) if live_status else None
+            looks_stale = (
+                live_progress is not None and live_progress < 1.0 and archive_age.total_seconds() > 2 * 60 * 60
+            )
+            if looks_stale:
                 logger.warning(
-                    f"Found stale 'printing' archive {existing_archive.id} (age: {archive_age}), "
-                    f"marking as cancelled and creating new archive"
+                    f"Found stale 'printing' archive {existing_archive.id} (age: {archive_age}, "
+                    f"printer progress {live_progress:.0f}%) — marking cancelled and creating new archive"
                 )
                 existing_archive.status = "cancelled"
                 existing_archive.failure_reason = "Stale - print likely cancelled or failed without status update"
                 await db.commit()
                 # Fall through to create new archive (don't return)
-                _existing_archive = None  # Clear so we don't use stale archive
             else:
                 logger.info(
                     f"Skipping duplicate - already have printing archive {existing_archive.id} for {check_name}"
@@ -2660,6 +2757,14 @@ async def on_print_start(printer_id: int, data: dict):
                     if mc_remaining and isinstance(mc_remaining, (int, float)) and mc_remaining > 0:
                         fallback_print_time = int(mc_remaining * 60)
 
+                # Best-effort filament metadata from MQTT — see
+                # _extract_filament_data_from_mqtt. Without this the fallback
+                # archive's filament fields stayed NULL even though the AMS
+                # state at print start was sitting right there in `data`.
+                # The slicer's ams_mapping (when present) narrows the result
+                # to slots actually used by the print (#1533).
+                mqtt_filament_meta = _extract_filament_data_from_mqtt(data, _get_start_ams_mapping(data, None))
+
                 # Create minimal archive entry
                 fallback_archive = PrintArchive(
                     printer_id=printer_id,
@@ -2671,6 +2776,8 @@ async def on_print_start(printer_id: int, data: dict):
                     status="printing",
                     started_at=datetime.now(timezone.utc),
                     subtask_id=subtask_id,
+                    filament_type=mqtt_filament_meta.get("filament_type"),
+                    filament_color=mqtt_filament_meta.get("filament_color"),
                     extra_data={"no_3mf_available": True, "original_subtask": subtask_name, "_print_data": data},
                 )
 
@@ -3092,6 +3199,52 @@ async def _scan_for_timelapse_with_retries(archive_id: int, baseline_names: set[
     logger.warning("[TIMELAPSE] All attempts exhausted for archive %s, giving up", archive_id)
 
 
+async def on_print_running_observed(printer_id: int, data: dict):
+    """Restart-recovery: capture a fresh timelapse baseline for a print that
+    started before Bambuddy came up.
+
+    bambu_mqtt.py suppresses ``on_print_start`` on the first RUNNING push
+    after Bambuddy startup (#1304 guard, prevents duplicate archive
+    creation). Without that path, ``_capture_timelapse_baseline_at_start``
+    never runs and ``_scan_for_timelapse_with_retries`` falls into its
+    "take baseline now" fallback at completion time — but by then the
+    printer has already uploaded the in-flight MP4, so the baseline
+    includes it and no diff ever matches (#1485 follow-up).
+
+    Fires once per session, in lieu of on_print_start when restart-recovery
+    kicks in. The printer doesn't upload the timelapse until after PRINT
+    COMPLETE, so a baseline captured any time during the print is still
+    pre-upload.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Avoid double-capture: on_print_start may have run earlier in this
+    # Bambuddy process if the print started AFTER startup and we crashed
+    # later in the same session. (Realistically this can't happen — the
+    # MQTT client object would have been recreated — but the cheap guard
+    # is correct regardless.)
+    if printer_id in _timelapse_baselines:
+        logger.debug(
+            "[TIMELAPSE] on_print_running_observed: baseline already present for printer %s, skipping",
+            printer_id,
+        )
+        return
+
+    async with async_session() as db:
+        from backend.app.models.printer import Printer
+
+        result = await db.execute(select(Printer).where(Printer.id == printer_id))
+        printer = result.scalar_one_or_none()
+        if not printer:
+            logger.warning(
+                "[TIMELAPSE] on_print_running_observed: printer %s not found in DB, skipping baseline",
+                printer_id,
+            )
+            return
+
+    await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
+
+
 async def on_print_complete(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
@@ -3268,24 +3421,43 @@ async def on_print_complete(printer_id: int, data: dict):
                 if archive:
                     archive_id = archive.id
 
-    # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374)
-    # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S)
+    # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374, #1542)
+    # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S, A1)
     # auto-start files found in root on power cycle, causing ghost prints.
     # Must run before the archive_id early-return so it executes even when archiving is disabled.
     try:
         if subtask_name:
+            archive_filename: str | None = None
             async with async_session() as db:
+                from backend.app.models.archive import PrintArchive
                 from backend.app.models.printer import Printer
 
                 result = await db.execute(select(Printer).where(Printer.id == printer_id))
                 printer = result.scalar_one_or_none()
+                if archive_id:
+                    archive_row = await db.execute(select(PrintArchive.filename).where(PrintArchive.id == archive_id))
+                    archive_filename = archive_row.scalar_one_or_none()
 
             if printer:
                 from backend.app.services.bambu_ftp import delete_file_async
+                from backend.app.utils.filename import derive_remote_filename
 
-                # Try both .3mf and .gcode extensions — the printer may have either
+                # Primary candidate: the exact path the dispatcher uploaded to
+                # (derived from archive.filename via the same rule as upload).
+                # Without it, a library row that ended up with a doubled
+                # .gcode.3mf (#1542) leaves the real file behind because the
+                # subtask_name + ext fallbacks below don't match what's on the
+                # SD card. Fallbacks remain for archive-less prints (subtask
+                # never resolved to an archive) and for older naming variants.
+                candidate_paths: list[str] = []
+                if archive_filename:
+                    candidate_paths.append(f"/{derive_remote_filename(archive_filename)}")
                 for ext in (".3mf", ".gcode"):
-                    remote_path = f"/{subtask_name}{ext}"
+                    fallback = f"/{subtask_name}{ext}"
+                    if fallback not in candidate_paths:
+                        candidate_paths.append(fallback)
+
+                for remote_path in candidate_paths:
                     # Retry up to 3 times — the printer may still lock the filesystem briefly after a print ends
                     for attempt in range(1, 4):
                         try:
@@ -4425,7 +4597,13 @@ RUNTIME_TRACKING_INTERVAL = 30  # Update every 30 seconds
 
 
 async def track_printer_runtime():
-    """Background task to track printer active runtime (RUNNING/PAUSE states)."""
+    """Background task to track printer active runtime (RUNNING state only).
+
+    PAUSE is intentionally excluded — the runtime counter feeds hours-based
+    maintenance intervals (rod lubrication, belt checks, nozzle cleaning)
+    which track mechanical wear. Pause time has no motion and no wear, so
+    counting it inflates maintenance warnings (#1521).
+    """
     logger = logging.getLogger(__name__)
 
     # Wait for MQTT connections to establish on startup
@@ -4463,7 +4641,7 @@ async def track_printer_runtime():
                 new_runtime = runtime_secs
                 new_last_update = last_update
 
-                if state.state in ("RUNNING", "PAUSE"):
+                if state.state == "RUNNING":
                     if last_update:
                         lu = last_update if last_update.tzinfo else last_update.replace(tzinfo=timezone.utc)
                         elapsed = (now - lu).total_seconds()
@@ -4813,6 +4991,7 @@ async def lifespan(app: FastAPI):
     printer_manager.set_status_change_callback(on_printer_status_change)
     printer_manager.set_print_start_callback(on_print_start)
     printer_manager.set_print_complete_callback(on_print_complete)
+    printer_manager.set_print_running_observed_callback(on_print_running_observed)
     printer_manager.set_ams_change_callback(on_ams_change)
 
     # Rehydrate persisted awaiting-plate-clear gate (#961) so prompts survive restarts
@@ -5026,6 +5205,12 @@ async def lifespan(app: FastAPI):
     # L-2: Start periodic auth cleanup (stale TOTP + expired revoked JTIs)
     start_auth_cleanup()
 
+    # Event-loop stall watchdog: dumps all thread stacks to stderr if the loop
+    # freezes (#1486 — silent "container hangs after adding a printer" reports).
+    from backend.app.services.loop_watchdog import start_loop_watchdog
+
+    start_loop_watchdog()
+
     # Initialize virtual printer manager and sync from DB
     from backend.app.services.virtual_printer import virtual_printer_manager
 
@@ -5053,6 +5238,9 @@ async def lifespan(app: FastAPI):
     stop_runtime_tracking()
     stop_spoolbuddy_watchdog()
     stop_camera_cleanup()
+    from backend.app.services.loop_watchdog import stop_loop_watchdog
+
+    stop_loop_watchdog()
     # Tear down all camera fan-out broadcasters (#1089) so subscribers exit
     # cleanly rather than waiting on a queue that nothing will ever fill.
     try:
@@ -5231,6 +5419,16 @@ def _frame_ancestors(default_value: str) -> str:
 @app.middleware("http")
 async def security_headers_middleware(request, call_next):
     """Add standard HTTP security headers to every response."""
+    # Per-request nonce stamped into `script-src` (#1460). On its own this
+    # changes nothing for Bambuddy's own pages — index.html has no inline
+    # scripts since the SW registration moved to /sw-register.js. The reason
+    # it's here is Cloudflare: a CF-fronted deployment has the bot-detection
+    # script injected into the HTML on the edge, with a fresh hash on every
+    # load (so hashes can't be allowlisted). When CF sees a nonce in our CSP,
+    # it clones the same nonce onto its injected <script>, and the inline
+    # script passes the policy without us needing 'unsafe-inline'. See
+    # https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/#if-you-have-a-content-security-policy-csp
+    csp_nonce = secrets.token_urlsafe(16)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     # X-Frame-Options is the legacy cross-origin embedding control. Modern
@@ -5256,11 +5454,11 @@ async def security_headers_middleware(request, call_next):
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; "
             "media-src 'self' blob:; "
             "connect-src 'self' ws: wss:; "
-            "font-src 'self' data: https://fonts.gstatic.com; "
+            "font-src 'self' data:; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "frame-src 'self' http: https:; " + _frame_ancestors("'self'")
@@ -5283,12 +5481,12 @@ async def security_headers_middleware(request, call_next):
     else:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            f"script-src 'self' 'nonce-{csp_nonce}'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; "
             "media-src 'self' blob:; "
             "connect-src 'self' ws: wss:; "
-            "font-src 'self' data: https://fonts.gstatic.com; "
+            "font-src 'self' data:; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "frame-src 'self' http: https:; " + _frame_ancestors("'none'")
@@ -5542,6 +5740,16 @@ if app_settings.static_dir.exists() and any(app_settings.static_dir.iterdir()):
             StaticFiles(directory=app_settings.static_dir / "icons"),
             name="icons",
         )
+    # Self-hosted Inter woff2 files (#1460). Without this mount /fonts/*.woff2
+    # falls through to the SPA catch-all and returns index.html, which the
+    # browser's font sanitizer rejects ("downloadable font: rejected by
+    # sanitizer").
+    if (app_settings.static_dir / "fonts").exists():
+        app.mount(
+            "/fonts",
+            StaticFiles(directory=app_settings.static_dir / "fonts"),
+            name="fonts",
+        )
 
 
 @app.get("/")
@@ -5576,7 +5784,11 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.get("/manifest.json")
+# GET + HEAD on the three PWA bootstrap routes (#1460). Scanners and a plain
+# `curl -I` use HEAD; FastAPI's @app.get only registers GET, so HEAD answers
+# with 405 Method Not Allowed and shows up as a "broken manifest" red herring
+# in deployment debugging.
+@app.api_route("/manifest.json", methods=["GET", "HEAD"])
 async def serve_manifest():
     """Serve PWA manifest."""
     manifest_file = app_settings.static_dir / "manifest.json"
@@ -5585,7 +5797,7 @@ async def serve_manifest():
     return {"error": "Manifest not found"}
 
 
-@app.get("/sw.js")
+@app.api_route("/sw.js", methods=["GET", "HEAD"])
 async def serve_service_worker():
     """Serve service worker."""
     sw_file = app_settings.static_dir / "sw.js"
@@ -5598,7 +5810,7 @@ async def serve_service_worker():
     return {"error": "Service worker not found"}
 
 
-@app.get("/sw-register.js")
+@app.api_route("/sw-register.js", methods=["GET", "HEAD"])
 async def serve_sw_register():
     """Serve the service-worker registration bootstrap script.
 
